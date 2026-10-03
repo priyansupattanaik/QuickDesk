@@ -4,12 +4,13 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.deps import get_current_user, require_role
 from app.database import get_db
-from app.models import Ticket, TicketStatus, User
-from app.schemas import TicketCreate, TicketListResponse, TicketReply, TicketResponse
+from app.models import OverrideLog, Ticket, TicketStatus, User
+from app.schemas import ClassificationOverride, TicketCreate, TicketListResponse, TicketReply, TicketResponse
+from app.realtime import publish
 from app.services.llm import classify_ticket, generate_reply
 from app.services.rag import citations_for, get_relevant_chunks
 
@@ -18,7 +19,7 @@ router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
 
 def _ticket_query() -> select:
-    return select(Ticket).options(joinedload(Ticket.employee))
+    return select(Ticket).options(joinedload(Ticket.employee), selectinload(Ticket.override_logs).joinedload(OverrideLog.agent))
 
 
 def _get_ticket(ticket_id: UUID, db: Session) -> Ticket:
@@ -33,7 +34,7 @@ def _escape_like(value: str) -> str:
 
 
 @router.post("", response_model=TicketResponse, status_code=status.HTTP_201_CREATED)
-def create_ticket(payload: TicketCreate, user: User = Depends(require_role("employee", "agent")), db: Session = Depends(get_db)) -> Ticket:
+async def create_ticket(payload: TicketCreate, user: User = Depends(require_role("employee", "agent")), db: Session = Depends(get_db)) -> Ticket:
     ticket = Ticket(employee_id=user.id, title=payload.title, description=payload.description, attachment_filename=payload.attachment_filename)
     db.add(ticket)
     db.flush()
@@ -41,14 +42,20 @@ def create_ticket(payload: TicketCreate, user: User = Depends(require_role("empl
         result = classify_ticket(ticket.title, ticket.description)
         ticket.ai_category = result["category"]
         ticket.ai_priority = result["priority"]
+        ticket.final_category = result["category"]
+        ticket.final_priority = result["priority"]
         ticket.ai_classified = not result.get("fallback", False)
     except Exception:
         logger.exception("Ticket classification failed")
         ticket.ai_category = "Other"
         ticket.ai_priority = "Medium"
+        ticket.final_category = "Other"
+        ticket.final_priority = "Medium"
         ticket.ai_classified = False
     db.commit()
-    return _get_ticket(ticket.id, db)
+    created = _get_ticket(ticket.id, db)
+    await publish("agents", "ticket_created", {"id": str(created.id), "title": created.title, "ai_category": created.ai_category, "ai_priority": created.ai_priority, "status": created.status.value, "created_at": created.created_at.isoformat(), "employee_email": created.employee.email})
+    return created
 
 
 @router.get("/mine", response_model=list[TicketResponse])
@@ -70,7 +77,7 @@ def list_tickets(
     user: User = Depends(require_role("agent")),
     db: Session = Depends(get_db),
 ) -> dict:
-    query = select(Ticket).options(joinedload(Ticket.employee))
+    query = select(Ticket).options(joinedload(Ticket.employee), selectinload(Ticket.override_logs).joinedload(OverrideLog.agent))
     filters = []
     if status_filter:
         filters.append(Ticket.status == status_filter)
@@ -94,6 +101,21 @@ def get_ticket(ticket_id: UUID, user: User = Depends(get_current_user), db: Sess
     return ticket
 
 
+@router.patch("/{ticket_id}/classification", response_model=TicketResponse)
+def override_classification(ticket_id: UUID, payload: ClassificationOverride, user: User = Depends(require_role("agent")), db: Session = Depends(get_db)) -> Ticket:
+    if payload.final_category is None and payload.final_priority is None:
+        raise HTTPException(status_code=422, detail="At least one classification value is required")
+    ticket = _get_ticket(ticket_id, db)
+    if payload.final_category is not None and payload.final_category != (ticket.final_category or ticket.ai_category):
+        db.add(OverrideLog(ticket=ticket, agent_id=user.id, field="category", from_value=ticket.final_category or ticket.ai_category, to_value=payload.final_category))
+        ticket.final_category = payload.final_category
+    if payload.final_priority is not None and payload.final_priority != (ticket.final_priority or ticket.ai_priority):
+        db.add(OverrideLog(ticket=ticket, agent_id=user.id, field="priority", from_value=ticket.final_priority or ticket.ai_priority, to_value=payload.final_priority))
+        ticket.final_priority = payload.final_priority
+    db.commit()
+    return _get_ticket(ticket.id, db)
+
+
 @router.post("/{ticket_id}/ai-draft")
 def draft(ticket_id: UUID, user: User = Depends(require_role("agent")), db: Session = Depends(get_db)) -> dict:
     ticket = _get_ticket(ticket_id, db)
@@ -111,7 +133,7 @@ def draft(ticket_id: UUID, user: User = Depends(require_role("agent")), db: Sess
 
 
 @router.post("/{ticket_id}/reply", response_model=TicketResponse)
-def reply(ticket_id: UUID, payload: TicketReply, user: User = Depends(require_role("agent")), db: Session = Depends(get_db)) -> Ticket:
+async def reply(ticket_id: UUID, payload: TicketReply, user: User = Depends(require_role("agent")), db: Session = Depends(get_db)) -> Ticket:
     ticket = _get_ticket(ticket_id, db)
     if ticket.status != TicketStatus.open:
         raise HTTPException(status_code=409, detail="Ticket already resolved")
@@ -119,4 +141,6 @@ def reply(ticket_id: UUID, payload: TicketReply, user: User = Depends(require_ro
     ticket.status = TicketStatus.resolved
     ticket.resolved_at = datetime.now(timezone.utc)
     db.commit()
-    return _get_ticket(ticket.id, db)
+    resolved = _get_ticket(ticket.id, db)
+    await publish(f"user:{resolved.employee_id}", "ticket_resolved", {"ticket_id": str(resolved.id), "status": resolved.status.value, "resolved_at": resolved.resolved_at.isoformat()})
+    return resolved
