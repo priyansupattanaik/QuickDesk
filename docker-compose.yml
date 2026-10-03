@@ -1,0 +1,18 @@
+services:
+  db:
+    image: postgres:16
+    container_name: quickdesk-db
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_USER: quickdesk
+      POSTGRES_PASSWORD: quickdesk
+      POSTGRES_DB: quickdesk
+    volumes: [quickdesk-postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quickdesk -d quickdesk"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+volumes:
+  quickdesk-postgres:
+
