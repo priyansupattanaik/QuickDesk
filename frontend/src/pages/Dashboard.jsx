@@ -1,0 +1,4 @@
+import { useEffect, useState } from "react";
+import { useAuth } from "../context/AuthContext";
+import client from "../api/client";
+export default function Dashboard() { const { user } = useAuth(); const [summary, setSummary] = useState(null); useEffect(() => { if (user?.role === "agent") client.get("/api/agents/summary").then(({ data }) => setSummary(data)); }, [user]); return <section className="content"><div className="eyebrow">WORKSPACE / OVERVIEW</div><h1>Good to see you, {user?.full_name.split(" ")[0]}.</h1><p className="lead">Authenticated as <strong>{user?.email}</strong> ({user?.role}).</p><div className="status-card"><span className="status-dot" />Your workspace is ready<span className="card-note">Ticket workflows arrive in Phase 2.</span></div>{summary && <div className="status-card"><strong>{summary.total_agents}</strong> agent account{summary.total_agents === 1 ? "" : "s"} active<span className="card-note">{summary.message}</span></div>}</section>; }
