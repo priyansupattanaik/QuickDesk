@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 from app.models import TicketStatus, UserRole
 
 
@@ -67,6 +67,9 @@ class TicketResponse(BaseModel):
     ai_draft: str | None
     ai_citations: list[dict] | None
     final_reply: str | None
+    final_category: str
+    final_priority: str
+    audit_log: list["OverrideLogResponse"] = Field(default_factory=list, validation_alias=AliasChoices("audit_log", "override_logs"))
     employee: EmployeeSummary
     created_at: datetime
     resolved_at: datetime | None
@@ -77,3 +80,25 @@ class TicketListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class OverrideLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    field: str
+    from_value: str
+    to_value: str
+    created_at: datetime
+    agent: UserSummary
+
+
+class ClassificationOverride(BaseModel):
+    final_category: str | None = Field(default=None, pattern="^(IT|HR|Finance|Admin|Other)$")
+    final_priority: str | None = Field(default=None, pattern="^(Low|Medium|High)$")
+
+
+class MetricsResponse(BaseModel):
+    by_status: dict[str, int]
+    by_category: list[dict[str, str | int]]
+    median_resolution_seconds: float | None
+    override_rate_percent: float | None

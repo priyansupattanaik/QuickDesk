@@ -21,6 +21,7 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     tickets: Mapped[list["Ticket"]] = relationship(back_populates="employee")
+    override_logs: Mapped[list["OverrideLog"]] = relationship(back_populates="agent")
 
 
 class TicketStatus(str, enum.Enum):
@@ -55,7 +56,23 @@ class Ticket(Base):
     ai_draft: Mapped[str | None] = mapped_column(Text)
     ai_citations: Mapped[list[dict] | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     final_reply: Mapped[str | None] = mapped_column(Text)
+    final_category: Mapped[str | None] = mapped_column(String(20))
+    final_priority: Mapped[str | None] = mapped_column(String(10))
     employee_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     employee: Mapped[User] = relationship(back_populates="tickets")
+    override_logs: Mapped[list["OverrideLog"]] = relationship(back_populates="ticket", order_by="OverrideLog.created_at.desc()", cascade="all, delete-orphan")
+
+
+class OverrideLog(Base):
+    __tablename__ = "override_logs"
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    ticket_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tickets.id"), nullable=False, index=True)
+    agent_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    field: Mapped[str] = mapped_column(String(20), nullable=False)
+    from_value: Mapped[str] = mapped_column(String(20), nullable=False)
+    to_value: Mapped[str] = mapped_column(String(20), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    ticket: Mapped[Ticket] = relationship(back_populates="override_logs")
+    agent: Mapped[User] = relationship(back_populates="override_logs")
