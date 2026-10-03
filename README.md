@@ -50,7 +50,7 @@ login -> signed JWT (sub=user id, role, exp) -> protected API dependency
 
 The six seeded articles are split with `RecursiveCharacterTextSplitter` at 500 characters with 50 characters of overlap. The corpus is intentionally small, so one or two useful chunks per article is preferable to fragmenting a short policy into pieces too small to retrieve. Embeddings use the local `sentence-transformers/all-MiniLM-L6-v2` model. NVIDIA embeddings would add a network dependency and cost to a corpus this size without improving the operating model.
 
-The vector store is an in-memory FAISS index rebuilt during startup, with a retriever configured for `k=3`. There is no index rebuild endpoint; restart the server after changing the knowledge base. `services/rag.py` owns loading, chunking, retrieval, and citations. `services/llm.py` owns the prompts and NVIDIA calls. The reply prompt says to use only the supplied excerpts and to admit when none are relevant. An empty retrieval still reaches the model with an explicit no-excerpts instruction.
+The vector store is a local ChromaDB collection rebuilt during startup, with a retriever configured for `k=3` and a small relevance threshold. Chroma keeps the collection and metadata in the ignored `backend/chroma_db` directory, but the application still rebuilds it so knowledge-base edits are picked up honestly on restart. There is no index rebuild endpoint. `services/rag.py` owns loading, chunking, retrieval, and citations. `services/llm.py` owns the prompts and NVIDIA calls. The reply prompt says to use only the supplied excerpts and to admit when none are relevant. An empty retrieval still reaches the model with an explicit no-excerpts instruction.
 
 ### NVIDIA NIM
 
@@ -72,7 +72,7 @@ Classification asks for strict JSON, extracts the first JSON object, validates b
 ### Decisions log
 
 - I use local MiniLM embeddings rather than NVIDIA-hosted embeddings because the six-article corpus does not justify another network dependency.
-- I rebuild in-memory FAISS at startup because the corpus is small and restart-to-refresh is an honest limitation at this stage.
+- I use local ChromaDB because it preserves document metadata and gives the small app a durable collection without adding a service; startup rebuild remains the refresh mechanism.
 - I use plain `WHERE` predicates and `ILIKE` for the queue because they are easy to inspect; a trigram index can be added if ticket volume grows.
 - I persist `ai_draft` and `final_reply` separately because the next phase needs to compare what the model suggested with what the agent sent.
 
@@ -93,7 +93,7 @@ If `JWT_SECRET_KEY` is empty in `QUICKDESK_ENV=dev`, startup generates a random 
 ## Known issues / limitations
 
 - There are no socket, override, metrics, refresh-token, or password-reset flows yet.
-- FAISS is rebuilt only when the server starts; there is no live KB refresh.
+- ChromaDB is rebuilt only when the server starts; there is no live KB refresh.
 - Agent filters use `ILIKE` rather than a search index.
 - JWTs are stored in localStorage and are not refreshable.
 - CORS currently allows the local Vite origin only.

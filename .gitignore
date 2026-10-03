@@ -8,4 +8,4 @@ dist/
 .idea/
 .vscode/
 *.db
-
+chroma_db/
