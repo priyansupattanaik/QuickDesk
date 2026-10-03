@@ -45,6 +45,9 @@ def rebuild_index() -> None:
 
 
 def get_relevant_chunks(ticket: Ticket) -> list[Document]:
+    global _store
+    if _store is None:
+        rebuild_index()
     if _store is None:
         return []
     retriever = _store.as_retriever(search_type="similarity_score_threshold", search_kwargs={"k": 3, "score_threshold": 0.2})

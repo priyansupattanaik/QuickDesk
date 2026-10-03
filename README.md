@@ -17,7 +17,9 @@ Copy-Item .env.example .env
 if (Get-Command openssl -ErrorAction SilentlyContinue) { openssl rand -hex 32 } else { python -c "import secrets; print(secrets.token_hex(32))" }
 ```
 
-Put the printed value in `JWT_SECRET_KEY` in `.env`. OpenSSL is the preferred generator. The Python fallback is in the same command because a normal Windows PATH often includes Git but not `openssl.exe`. Leave `NVIDIA_API_KEY` empty for the validated classification fallback, or provide a real key locally when testing live drafts. No key belongs in Git.
+Put the printed value in `JWT_SECRET_KEY` in `.env`. OpenSSL is the preferred generator. The Python fallback is in the same command because a normal Windows PATH often includes Git but not `openssl.exe`. Leave `NVIDIA_API_KEY` empty to use classification and draft fallbacks (template drafts with a `degraded` flag), or add a key from [build.nvidia.com](https://build.nvidia.com) for live NVIDIA NIM replies. The assignment brief listed several LLM vendors; this repo uses **NVIDIA NIM** via the OpenAI-compatible client. No key belongs in Git.
+
+**Knowledge base index and embeddings (first run):** On startup, `backend/app/main.py` calls `rebuild_index()`, which reads seeded KB articles from Postgres and writes a local Chroma collection under `backend/chroma_db/` (gitignored). The first successful run downloads `sentence-transformers/all-MiniLM-L6-v2` into your Hugging Face cache (~90MB). If the model or index is missing, retrieval returns no chunks and drafts still succeed in degraded mode. Re-run `python seed.py` then restart Uvicorn to rebuild after an empty database.
 
 ```powershell
 Set-Location backend
@@ -107,7 +109,7 @@ I would replace `migrate.py` with Alembic, move the SSE hub to Redis pub/sub for
 - SSE accepts a query-param token for browser compatibility. Production should use HTTPS and short-lived access tokens.
 - ChromaDB rebuilds when the server starts; there is no live knowledge-base refresh endpoint.
 - The ticket title filter uses `ILIKE`, not a search index.
-- NVIDIA drafting requires a configured provider key and reachable provider. Classification has a safe fallback; drafts do not fabricate citations when generation fails.
+- Without `NVIDIA_API_KEY`, reply drafts use a template grounded on retrieved KB excerpts when available; the API returns HTTP 200 with `degraded: true`. Live NVIDIA drafting requires a configured key and reachable provider.
 - JWTs are stored in localStorage and are not refreshable.
 - CORS currently allows the local Vite origin only.
 - The console notifier is a mock backend and does not send external email.
@@ -127,6 +129,10 @@ Run this before recording the demo. Use `http://localhost:5173`, the seeded cred
 9. Stop Uvicorn with `Ctrl+C`, start it again with the documented one-worker command, and revisit both pages. Expected: both pages recover their state from REST without manual data repair.
 10. Watch the backend console while resolving a ticket. Expected: one `---------- MOCK EMAIL ----------` block shows the employee recipient, subject, body, and closing delimiter.
 11. Click **Log out** in both profiles, then click **Sign in** again with the same credentials. Expected: each role returns to its permitted workspace and cannot access the other role's navigation or protected endpoints.
+
+## Where AI helped and where it hurt
+
+AI sped up scaffolding (routes, React pages, KB markdown, test stubs) and produced a workable RAG + classification shape. Humans and tests had to fix several integration mistakes: the agent queue filtered on `ai_*` while the UI showed `final_*`, the SSE hub broadcast agent-only `ticket_created` payloads (including other employees' emails) to every connected client, employees were linked to an agent-only ticket route, drafts returned 502 when `NVIDIA_API_KEY` or the local MiniLM index was missing, and the agent ticket page hid the AI draft after resolve. Those are corrected in this tree. For a spoken walkthrough, use [docs/demo-outline.md](docs/demo-outline.md) — there is no demo video in the repository.
 
 ## Tested on
 

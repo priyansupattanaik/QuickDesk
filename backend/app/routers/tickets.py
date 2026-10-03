@@ -11,7 +11,7 @@ from app.database import get_db
 from app.models import OverrideLog, Ticket, TicketStatus, User
 from app.schemas import ClassificationOverride, TicketCreate, TicketListResponse, TicketReply, TicketResponse
 from app.realtime import publish
-from app.services.llm import classify_ticket, generate_reply
+from app.services.llm import classify_ticket, generate_degraded_draft, generate_reply
 from app.services.notifier import notify_resolution
 from app.services.rag import citations_for, get_relevant_chunks
 
@@ -83,9 +83,9 @@ def list_tickets(
     if status_filter:
         filters.append(Ticket.status == status_filter)
     if category:
-        filters.append(Ticket.ai_category == category)
+        filters.append(Ticket.final_category == category)
     if priority:
-        filters.append(Ticket.ai_priority == priority)
+        filters.append(Ticket.final_priority == priority)
     if q:
         filters.append(Ticket.title.ilike(f"%{_escape_like(q)}%", escape="\\"))
     query = query.where(*filters)
@@ -120,17 +120,19 @@ def override_classification(ticket_id: UUID, payload: ClassificationOverride, us
 @router.post("/{ticket_id}/ai-draft")
 def draft(ticket_id: UUID, user: User = Depends(require_role("agent")), db: Session = Depends(get_db)) -> dict:
     ticket = _get_ticket(ticket_id, db)
+    chunks = get_relevant_chunks(ticket)
+    citations = citations_for(chunks)
+    degraded = False
     try:
-        chunks = get_relevant_chunks(ticket)
-        citations = citations_for(chunks)
         draft_text = generate_reply(ticket, chunks)
     except Exception:
-        logger.exception("AI draft generation failed")
-        raise HTTPException(status_code=502, detail="AI provider error, try again")
+        logger.exception("AI draft generation failed; using degraded template draft")
+        draft_text = generate_degraded_draft(ticket, chunks)
+        degraded = True
     ticket.ai_draft = draft_text
     ticket.ai_citations = citations
     db.commit()
-    return {"ai_draft": draft_text, "citations": citations}
+    return {"ai_draft": draft_text, "citations": citations, "degraded": degraded}
 
 
 @router.post("/{ticket_id}/reply", response_model=TicketResponse)

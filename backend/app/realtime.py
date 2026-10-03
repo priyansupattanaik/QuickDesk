@@ -25,7 +25,10 @@ async def deregister(connection: Connection) -> None:
 
 async def publish(channel: str, event: str, data: dict[str, Any]) -> None:
     for connection in tuple(_connections):
-        if channel != "agents" and channel != f"user:{connection.user_id}":
+        if channel == "agents":
+            if connection.role != "agent":
+                continue
+        elif channel != f"user:{connection.user_id}":
             continue
         try:
             connection.queue.put_nowait({"event": event, "data": data})

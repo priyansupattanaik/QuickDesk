@@ -43,6 +43,32 @@ def classify_ticket(title: str, description: str) -> dict[str, Any]:
     return {"category": "Other", "priority": "Medium", "fallback": True}
 
 
+def generate_degraded_draft(ticket: Any, context_chunks: list[Any]) -> str:
+    lines = [
+        f"Thank you for contacting support regarding \"{ticket.title}\".",
+        "",
+        "We are reviewing your request:",
+        ticket.description.strip(),
+        "",
+    ]
+    if context_chunks:
+        lines.append("Relevant knowledge base excerpts:")
+        for index, chunk in enumerate(context_chunks, start=1):
+            title = chunk.metadata.get("title") if hasattr(chunk, "metadata") else ""
+            prefix = f"{index}. {title}: " if title else f"{index}. "
+            lines.append(prefix + chunk.page_content.strip())
+        lines.append("")
+        lines.append("An agent will follow up with the steps above or request more details if needed.")
+    else:
+        lines.append(
+            "We do not have a matching knowledge base article for this issue yet. "
+            "An agent will gather more details and follow up shortly."
+        )
+    lines.append("")
+    lines.append("(Draft generated without the NVIDIA NIM provider — configure NVIDIA_API_KEY for AI-written replies.)")
+    return "\n".join(lines)
+
+
 def generate_reply(ticket: Any, context_chunks: list[Any]) -> str:
     if not settings.nvidia_api_key:
         raise RuntimeError("NVIDIA_API_KEY is not configured")

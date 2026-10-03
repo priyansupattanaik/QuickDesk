@@ -123,6 +123,19 @@ def test_employee_cannot_list_agent_tickets():
     assert client.get("/api/tickets", headers=token(employee_id, "employee")).status_code == 403
 
 
+def test_agent_queue_filters_use_final_classification(monkeypatch):
+    employee_id, _, agent_id = auth_users()
+    monkeypatch.setattr(tickets_router, "classify_ticket", lambda *_: {"category": "IT", "priority": "High", "fallback": False})
+    created = client.post("/api/tickets", headers=token(employee_id, "employee"), json={"title": "VPN", "description": "Need VPN"}).json()
+    client.patch(
+        f"/api/tickets/{created['id']}/classification",
+        headers=token(agent_id, "agent"),
+        json={"final_category": "HR"},
+    )
+    assert client.get("/api/tickets?category=HR", headers=token(agent_id, "agent")).json()["total"] == 1
+    assert client.get("/api/tickets?category=IT", headers=token(agent_id, "agent")).json()["total"] == 0
+
+
 def test_agent_filters_search_and_pagination(monkeypatch):
     _, employee_id, agent_id = auth_users()
     monkeypatch.setattr(tickets_router, "classify_ticket", lambda title, *_: {"category": "IT" if "VPN" in title else "HR", "priority": "High", "fallback": False})
@@ -151,9 +164,27 @@ def test_agent_draft_persists_citations(monkeypatch):
     monkeypatch.setattr(tickets_router, "generate_reply", lambda *_: "Follow the VPN steps.")
     response = client.post(f"/api/tickets/{created['id']}/ai-draft", headers=token(agent_id, "agent"))
     assert response.status_code == 200
-    assert response.json() == {"ai_draft": "Follow the VPN steps.", "citations": [{"article_id": "a1", "title": "VPN"}]}
+    assert response.json() == {"ai_draft": "Follow the VPN steps.", "citations": [{"article_id": "a1", "title": "VPN"}], "degraded": False}
     detail = client.get(f"/api/tickets/{created['id']}", headers=token(agent_id, "agent")).json()
     assert detail["ai_citations"] == response.json()["citations"]
+
+
+def test_ai_draft_degrades_without_provider(monkeypatch):
+    employee_id, _, agent_id = auth_users()
+    created = client.post("/api/tickets", headers=token(employee_id, "employee"), json={"title": "VPN", "description": "Need VPN"}).json()
+    monkeypatch.setattr(tickets_router, "get_relevant_chunks", lambda _: [])
+    monkeypatch.setattr(tickets_router, "citations_for", lambda _: [])
+
+    def fail_generate(*_):
+        raise RuntimeError("NVIDIA_API_KEY is not configured")
+
+    monkeypatch.setattr(tickets_router, "generate_reply", fail_generate)
+    response = client.post(f"/api/tickets/{created['id']}/ai-draft", headers=token(agent_id, "agent"))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["degraded"] is True
+    assert body["ai_draft"]
+    assert "NVIDIA" in body["ai_draft"]
 
 
 def test_empty_retrieval_still_returns_draft(monkeypatch):
