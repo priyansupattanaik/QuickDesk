@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     nvidia_api_key: str = Field(default="", validation_alias="NVIDIA_API_KEY")
     nvidia_base_url: str = Field(default="https://integrate.api.nvidia.com/v1", validation_alias="NVIDIA_BASE_URL")
     nvidia_model: str = Field(default="meta/llama-3.3-70b-instruct", validation_alias="NVIDIA_MODEL")
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=(".env", "../.env"), extra="ignore")
 
     @model_validator(mode="after")
     def validate_secret(self) -> "Settings":
