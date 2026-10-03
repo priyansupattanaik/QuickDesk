@@ -12,6 +12,7 @@ from app.models import OverrideLog, Ticket, TicketStatus, User
 from app.schemas import ClassificationOverride, TicketCreate, TicketListResponse, TicketReply, TicketResponse
 from app.realtime import publish
 from app.services.llm import classify_ticket, generate_reply
+from app.services.notifier import notify_resolution
 from app.services.rag import citations_for, get_relevant_chunks
 
 logger = logging.getLogger(__name__)
@@ -142,5 +143,10 @@ async def reply(ticket_id: UUID, payload: TicketReply, user: User = Depends(requ
     ticket.resolved_at = datetime.now(timezone.utc)
     db.commit()
     resolved = _get_ticket(ticket.id, db)
+    try:
+        notify_resolution(resolved, user)
+    except Exception:
+        # A notification failure must not undo a committed resolution.
+        logger.exception("Resolution notification failed")
     await publish(f"user:{resolved.employee_id}", "ticket_resolved", {"ticket_id": str(resolved.id), "status": resolved.status.value, "resolved_at": resolved.resolved_at.isoformat()})
     return resolved

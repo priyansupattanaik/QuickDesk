@@ -11,7 +11,5 @@ router = APIRouter(prefix="/api/agents", tags=["agents"])
 
 @router.get("/summary")
 def summary(user: User = Depends(require_role("agent")), db: Session = Depends(get_db)) -> dict[str, int | str]:
-    # Phase 4 replaces this placeholder with real metrics.
     total_agents = db.scalar(select(func.count(User.id)).where(User.role == UserRole.agent)) or 0
     return {"total_agents": total_agents, "message": "Agent-only endpoint reachable"}
-
