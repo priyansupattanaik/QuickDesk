@@ -69,14 +69,43 @@ def test_events_reject_missing_and_garbage_tokens():
 
 
 def test_ticket_create_and_reply_publish_events(monkeypatch):
-    employee_id, agent_id = users(); captured = []
+    employee_id, agent_id = users(); captured = []; emails = []
     async def capture(channel, event, data):
         captured.append((channel, event, data))
+    def capture_email(ticket, agent):
+        emails.append((ticket.employee.email, f"[QuickDesk] Resolved: {ticket.title}", ticket.final_reply))
     monkeypatch.setattr(tickets_router, "publish", capture)
+    monkeypatch.setattr(tickets_router, "notify_resolution", capture_email)
     created = client.post("/api/tickets", headers=auth(employee_id, "employee"), json={"title": "New", "description": "Details"}).json()
-    client.post(f"/api/tickets/{created['id']}/reply", headers=auth(agent_id, "agent"), json={"reply_text": "Done"})
+    resolved = client.post(f"/api/tickets/{created['id']}/reply", headers=auth(agent_id, "agent"), json={"reply_text": "Done"})
+    assert resolved.status_code == 200
+    assert emails == [("employee@example.com", "[QuickDesk] Resolved: New", "Done")]
     assert captured[0][0:2] == ("agents", "ticket_created") and captured[0][2]["id"] == created["id"]
     assert captured[1][0:2] == (f"user:{employee_id}", "ticket_resolved")
+
+
+def test_notification_failure_does_not_fail_resolution(monkeypatch):
+    employee_id, agent_id = users()
+
+    def fail_notification(ticket, agent):
+        raise RuntimeError("console unavailable")
+
+    async def ignore_event(*args):
+        return None
+
+    monkeypatch.setattr(tickets_router, "notify_resolution", fail_notification)
+    monkeypatch.setattr(tickets_router, "publish", ignore_event)
+    created = client.post("/api/tickets", headers=auth(employee_id, "employee"), json={"title": "Failure isolation", "description": "Details"}).json()
+    response = client.post(f"/api/tickets/{created['id']}/reply", headers=auth(agent_id, "agent"), json={"reply_text": "Still resolved"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "Resolved"
+
+
+def test_employee_cannot_reply_to_ticket(monkeypatch):
+    employee_id, agent_id = users()
+    created = client.post("/api/tickets", headers=auth(employee_id, "employee"), json={"title": "Permissions", "description": "Details"}).json()
+    response = client.post(f"/api/tickets/{created['id']}/reply", headers=auth(employee_id, "employee"), json={"reply_text": "Not allowed"})
+    assert response.status_code == 403
 
 
 def test_authenticated_event_stream_starts_with_heartbeat():
