@@ -43,6 +43,7 @@ async def create_ticket(payload: TicketCreate, user: User = Depends(require_role
         result = classify_ticket(ticket.title, ticket.description)
         ticket.ai_category = result["category"]
         ticket.ai_priority = result["priority"]
+        ticket.ai_confidence = result.get("confidence")
         ticket.final_category = result["category"]
         ticket.final_priority = result["priority"]
         ticket.ai_classified = not result.get("fallback", False)

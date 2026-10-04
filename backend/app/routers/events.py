@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.config import ALLOWED_ORIGINS
 from app.core.security import decode_access_token
 from app.database import get_db
 from app.models import User
@@ -51,4 +52,9 @@ async def events(request: Request, token: str | None = Query(default=None), db: 
         finally:
             await deregister(connection)
 
-    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Access-Control-Allow-Origin": "http://localhost:5173"})
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    origin = request.headers.get("origin")
+    if origin in ALLOWED_ORIGINS:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Vary"] = "Origin"
+    return StreamingResponse(stream(), media_type="text/event-stream", headers=headers)

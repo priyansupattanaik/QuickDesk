@@ -64,6 +64,7 @@ class TicketResponse(BaseModel):
     ai_category: str
     ai_priority: str
     ai_classified: bool
+    ai_confidence: int | None = None
     ai_draft: str | None
     ai_citations: list[dict] | None
     final_reply: str | None

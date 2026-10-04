@@ -1,4 +1,5 @@
 import logging
+import sys
 
 from app.models import Ticket, User
 from app.config import settings
@@ -25,10 +26,9 @@ def notify_resolution(ticket: Ticket, agent: User) -> dict[str, str]:
     if settings.email_backend != "console":
         raise RuntimeError(f"Unsupported email backend: {settings.email_backend}")
     email = build_resolution_email(ticket, agent)
-    logger.info(
-        "\n---------- MOCK EMAIL ----------\nTo: %s\nSubject: %s\n%s\n---------------------------------",
-        email["to"],
-        email["subject"],
-        email["body"],
+    print(
+        f"\n---------- MOCK EMAIL ----------\nTo: {email['to']}\nSubject: {email['subject']}\n{email['body']}\n---------------------------------",
+        file=sys.stdout,
+        flush=True
     )
     return email

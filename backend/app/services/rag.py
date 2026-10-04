@@ -19,12 +19,12 @@ _persist_directory = Path(__file__).resolve().parents[2] / "chroma_db"
 
 def rebuild_index() -> None:
     global _store
-    with SessionLocal() as db:
-        articles = db.scalars(select(KBArticle).order_by(KBArticle.slug)).all()
-    if not articles:
-        _store = None
-        return
     try:
+        with SessionLocal() as db:
+            articles = db.scalars(select(KBArticle).order_by(KBArticle.slug)).all()
+        if not articles:
+            _store = None
+            return
         splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
         documents = []
         for article in articles:

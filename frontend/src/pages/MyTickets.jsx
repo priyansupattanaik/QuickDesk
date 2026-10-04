@@ -1,12 +1,102 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import client from "../api/client";
 import useTicketEvents from "../realtime/useTicketEvents";
 
 export default function MyTickets() {
-  const [tickets, setTickets] = useState([]); const [error, setError] = useState("");
-  const loadTickets = useCallback(() => { client.get("/api/tickets/mine").then(({ data }) => setTickets(data)).catch(() => setError("Unable to load tickets")); }, []);
-  useEffect(() => { loadTickets(); }, [loadTickets]);
-  useTicketEvents({ onOpen: loadTickets, onTicketResolved: loadTickets }); // Reconnect open refetches the source of truth after a dropped stream.
-  return <section className="content wide"><div className="eyebrow">SUPPORT / MY TICKETS</div><h1>Your tickets.</h1><p className="lead">This view refreshes when opened and when a reply resolves one of your tickets.</p>{error && <p className="error">{error}</p>}<div className="ticket-list">{tickets.length ? tickets.map((ticket) => <Link className="ticket-row" to={`/tickets/mine/${ticket.id}`} key={ticket.id}><div><strong>{ticket.title}</strong><span className="muted">{new Date(ticket.created_at).toLocaleDateString()}</span></div><div className="ticket-meta"><span className={`badge ${ticket.status.toLowerCase()}`}>{ticket.status}</span><span className="chip">{ticket.final_category}</span><span className="chip">{ticket.final_priority}</span></div></Link>) : <div className="empty-card">No tickets yet.</div>}</div></section>;
+  const [tickets, setTickets] = useState([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const requestId = useRef(0);
+
+  const loadTickets = useCallback(() => {
+    const id = ++requestId.current;
+    client
+      .get("/api/tickets/mine")
+      .then(({ data }) => {
+        if (id !== requestId.current) return;
+        setError("");
+        setTickets(data);
+      })
+      .catch(() => {
+        if (id !== requestId.current) return;
+        setError("Unable to load tickets");
+      })
+      .finally(() => {
+        if (id === requestId.current) setLoading(false);
+      });
+  }, []);
+
+  const applyResolved = useCallback((event) => {
+    if (event?.ticket_id) {
+      setTickets((current) =>
+        current.map((ticket) =>
+          ticket.id === event.ticket_id
+            ? { ...ticket, status: event.status || "Resolved", resolved_at: event.resolved_at }
+            : ticket
+        )
+      );
+    }
+    loadTickets();
+  }, [loadTickets]);
+
+  useEffect(() => {
+    loadTickets();
+  }, [loadTickets]);
+
+  useTicketEvents({ onOpen: loadTickets, onTicketResolved: applyResolved });
+
+  return (
+    <section className="page-container">
+      <header className="page-header">
+        <h1 className="page-title">My Tickets</h1>
+        {tickets.length > 0 && (
+          <Link to="/tickets/new" className="primary btn-primary">
+            New ticket
+          </Link>
+        )}
+      </header>
+
+      {error && <div className="form-error" role="alert">{error}</div>}
+
+      {loading ? (
+        <div className="loading-state">Loading tickets...</div>
+      ) : tickets.length === 0 ? (
+        <div className="empty-state">
+          <p className="empty-text">You have not submitted any tickets yet.</p>
+          <Link to="/tickets/new" className="primary btn-primary">
+            New ticket
+          </Link>
+        </div>
+      ) : (
+        <div className="ticket-list-wrapper">
+          <div className="ticket-list">
+            {tickets.map((ticket) => (
+              <Link
+                key={ticket.id}
+                to={`/tickets/mine/${ticket.id}`}
+                className="ticket-list-row"
+              >
+                <div className="row-main">
+                  <span className="ticket-title">{ticket.title}</span>
+                </div>
+                <div className="row-meta">
+                  <span className="status-indicator status-flip" key={ticket.status}>
+                    {ticket.status}
+                    <span
+                      className={`dot ${
+                        ticket.status === "Open" ? "dot-open" : "dot-resolved"
+                      }`}
+                    />
+                  </span>
+                  <span className="row-category">{ticket.final_category}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }

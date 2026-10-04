@@ -24,13 +24,23 @@ def _json_object(text: str) -> dict[str, Any] | None:
         return None
     if not isinstance(value, dict) or value.get("category") not in CATEGORIES or value.get("priority") not in PRIORITIES:
         return None
-    return {"category": value["category"], "priority": value["priority"], "fallback": False}
+    
+    confidence = value.get("confidence")
+    if confidence is not None:
+        try:
+            confidence = int(confidence)
+            if not (0 <= confidence <= 100):
+                confidence = None
+        except (ValueError, TypeError):
+            confidence = None
+
+    return {"category": value["category"], "priority": value["priority"], "confidence": confidence, "fallback": False}
 
 
 def classify_ticket(title: str, description: str) -> dict[str, Any]:
     if not settings.nvidia_api_key:
         return {"category": "Other", "priority": "Medium", "fallback": True}
-    system = "Return only JSON: {\"category\": one of IT|HR|Finance|Admin|Other, \"priority\": one of Low|Medium|High}."
+    system = "Return only JSON: {\"category\": one of IT|HR|Finance|Admin|Other, \"priority\": one of Low|Medium|High, \"confidence\": integer 0-100}."
     user = f"Ticket title: {title}\nTicket description: {description}"
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     for attempt in range(2):

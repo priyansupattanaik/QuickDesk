@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import UUID
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_quickdesk.db")
+os.environ.setdefault("DATABASE_URL", "sqlite://")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-with-at-least-32-bytes-long")
 os.environ.setdefault("QUICKDESK_ENV", "test")
 

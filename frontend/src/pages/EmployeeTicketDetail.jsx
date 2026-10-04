@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import client from "../api/client";
 
 export default function EmployeeTicketDetail() {
@@ -16,61 +17,82 @@ export default function EmployeeTicketDetail() {
 
   if (error && !ticket) {
     return (
-      <section className="content">
-        <p className="error">{error}</p>
-        <Link to="/tickets/mine">Back to my tickets</Link>
+      <section className="page-container">
+        <div className="form-error" role="alert">{error}</div>
+        <Link to="/tickets/mine" className="back-link">
+          <ArrowLeft size={16} /> Back to my tickets
+        </Link>
       </section>
     );
   }
-  if (!ticket) return <div className="loading">Loading ticket...</div>;
+
+  if (!ticket) return <div className="loading-state">Loading ticket...</div>;
 
   return (
-    <section className="content wide">
-      <div className="eyebrow">SUPPORT / MY TICKET</div>
-      <div className="detail-heading">
-        <h1>{ticket.title}</h1>
-        <span className={`badge ${ticket.status.toLowerCase()}`}>{ticket.status}</span>
+    <section className="page-container">
+      <div className="detail-top-nav">
+        <Link to="/tickets/mine" className="back-link">
+          <ArrowLeft size={16} /> Back to my tickets
+        </Link>
       </div>
-      <p className="muted">
-        <Link to="/tickets/mine">← Back to my tickets</Link>
-      </p>
-      <div className="detail-card">
-        <h2>Your request</h2>
-        <p>{ticket.description}</p>
-        <div className="detail-grid">
-          <span>
-            <b>Submitted</b>
-            {new Date(ticket.created_at).toLocaleString()}
-          </span>
-          <span>
-            <b>Category</b>
-            {ticket.final_category}
-          </span>
-          <span>
-            <b>Priority</b>
-            {ticket.final_priority}
-          </span>
-          <span>
-            <b>Attachment</b>
-            {ticket.attachment_filename || "None"}
-          </span>
+
+      <div className="ticket-header-group">
+        <div className="ticket-title-row">
+          <span className="ticket-id">#{ticket.id}</span>
+          <h1 className="ticket-heading">{ticket.title}</h1>
+        </div>
+        <div className="status-indicator status-flip" key={ticket.status}>
+          <span
+            className={`dot ${
+              ticket.status === "Open" ? "dot-open" : "dot-resolved"
+            }`}
+          />
+          {ticket.status}
         </div>
       </div>
+
+      <div className="detail-section">
+        <h2 className="section-title">Your request</h2>
+        <div className="request-body">{ticket.description}</div>
+
+        <div className="meta-list">
+          <div className="meta-row">
+            <span className="meta-label">Submitted</span>
+            <span className="meta-val">
+              {new Date(ticket.created_at).toLocaleString()}
+            </span>
+          </div>
+          <div className="meta-row">
+            <span className="meta-label">Category</span>
+            <span className="meta-val">{ticket.final_category}</span>
+          </div>
+          <div className="meta-row">
+            <span className="meta-label">Attachment name</span>
+            <span className="meta-val">
+              {ticket.attachment_filename || "None"}
+            </span>
+          </div>
+        </div>
+      </div>
+
       {ticket.status === "Resolved" ? (
-        <div className="detail-card">
-          <h2>Support reply</h2>
-          <p>{ticket.final_reply}</p>
+        <div className="detail-section">
+          <h2 className="section-title">Support reply</h2>
+          <div className="reply-content">{ticket.final_reply}</div>
           {ticket.resolved_at && (
-            <p className="muted">Resolved {new Date(ticket.resolved_at).toLocaleString()}</p>
+            <div className="resolved-timestamp">
+              Resolved {new Date(ticket.resolved_at).toLocaleString()}
+            </div>
           )}
         </div>
       ) : (
-        <div className="detail-card">
-          <h2>Status</h2>
-          <p className="muted">Your ticket is open. An agent will respond here when it is resolved.</p>
+        <div className="detail-section">
+          <h2 className="section-title">Status</h2>
+          <p className="status-note">
+            Your ticket is currently open. A support agent will review and reply here.
+          </p>
         </div>
       )}
-      {error && <p className="error">{error}</p>}
     </section>
   );
 }

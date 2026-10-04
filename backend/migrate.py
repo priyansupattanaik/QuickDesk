@@ -15,7 +15,7 @@ with engine.begin() as connection:
         Base.metadata.create_all(connection)
     else:
         columns = {column["name"] for column in inspector.get_columns("tickets")}
-        for name, sql_type in (("final_category", "VARCHAR(20)"), ("final_priority", "VARCHAR(10)")):
+        for name, sql_type in (("final_category", "VARCHAR(20)"), ("final_priority", "VARCHAR(10)"), ("ai_confidence", "INTEGER")):
             if name not in columns:
                 connection.execute(text(f"ALTER TABLE tickets ADD COLUMN {name} {sql_type}"))
         connection.execute(text("UPDATE tickets SET final_category = ai_category WHERE final_category IS NULL"))

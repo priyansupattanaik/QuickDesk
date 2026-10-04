@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_quickdesk.db")
+os.environ.setdefault("DATABASE_URL", "sqlite://")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret-with-at-least-32-bytes-long")
 os.environ.setdefault("QUICKDESK_ENV", "test")
 
@@ -106,6 +106,76 @@ def test_employee_cannot_reply_to_ticket(monkeypatch):
     created = client.post("/api/tickets", headers=auth(employee_id, "employee"), json={"title": "Permissions", "description": "Details"}).json()
     response = client.post(f"/api/tickets/{created['id']}/reply", headers=auth(employee_id, "employee"), json={"reply_text": "Not allowed"})
     assert response.status_code == 403
+
+
+def test_open_streams_receive_create_and_resolve_events(monkeypatch):
+    from app.routers.events import events
+    from app.schemas import TicketCreate, TicketReply
+    from starlette.requests import Request
+
+    employee_id, agent_id = users()
+    with TestingSessionLocal() as db:
+        other = User(email="other@example.com", password_hash=hash_password("Password1"), full_name="Other", role=UserRole.employee)
+        second_agent = User(email="agent2@example.com", password_hash=hash_password("Password1"), full_name="Agent Two", role=UserRole.agent)
+        db.add_all([other, second_agent])
+        db.commit()
+        other_id, second_agent_id = other.id, second_agent.id
+    monkeypatch.setattr(tickets_router, "notify_resolution", lambda *_args, **_kwargs: None)
+
+    async def idle_receive():
+        await asyncio.Event().wait()
+
+    async def open_stream(user_id, role):
+        db = next(override_get_db())
+        token = create_access_token(str(user_id), role)
+        request = Request(
+            {"type": "http", "method": "GET", "path": "/api/events", "headers": [], "query_string": b""},
+            receive=idle_receive,
+        )
+        response = await events(request, token, db)
+        iterator = response.body_iterator
+        assert await iterator.__anext__() == ": heartbeat\n\n"
+        return iterator
+
+    async def scenario():
+        streams = {
+            "agent_a": await open_stream(agent_id, "agent"),
+            "agent_b": await open_stream(second_agent_id, "agent"),
+            "owner": await open_stream(employee_id, "employee"),
+            "other": await open_stream(other_id, "employee"),
+        }
+        try:
+            with TestingSessionLocal() as db:
+                employee = db.get(User, employee_id)
+                created = await tickets_router.create_ticket(
+                    TicketCreate(title="Live queue", description="Appears without refresh"),
+                    employee,
+                    db,
+                )
+                ticket_id = created.id
+
+            for name in ("agent_a", "agent_b"):
+                chunk = await asyncio.wait_for(streams[name].__anext__(), timeout=2)
+                assert chunk.startswith("event: ticket_created\n")
+                assert str(ticket_id) in chunk
+
+            with TestingSessionLocal() as db:
+                agent = db.get(User, agent_id)
+                await tickets_router.reply(ticket_id, TicketReply(reply_text="Done"), agent, db)
+
+            resolved = await asyncio.wait_for(streams["owner"].__anext__(), timeout=2)
+            assert resolved.startswith("event: ticket_resolved\n")
+            assert str(ticket_id) in resolved
+            assert '"status": "Resolved"' in resolved
+
+            for name in ("agent_a", "agent_b", "other"):
+                with pytest.raises(asyncio.TimeoutError):
+                    await asyncio.wait_for(streams[name].__anext__(), timeout=0.3)
+        finally:
+            for iterator in streams.values():
+                await iterator.aclose()
+
+    asyncio.run(scenario())
 
 
 def test_authenticated_event_stream_starts_with_heartbeat():

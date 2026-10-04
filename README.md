@@ -46,6 +46,14 @@ Open `http://localhost:5173`. The seeded credentials are:
 
 `python migrate.py` creates the schema on an empty database and adds the final-classification columns when `tickets` already exists. It is safe to run repeatedly, and it must run before `seed.py`. The console notifier is selected by default with `EMAIL_BACKEND=console`; a real SMTP implementation is the documented future swap.
 
+The command above starts only Postgres. The API and Vite app still run on the host so the local MiniLM cache and one-worker SSE hub stay on this machine. To run the whole stack in containers instead:
+
+```powershell
+docker compose --profile full up --build
+```
+
+That profile migrates, seeds the demo users and knowledge-base articles, and serves the UI at `http://localhost` with the API on port 8000. Do not run host Uvicorn on port 8000 at the same time. The first container start can log a knowledge-base miss because the embedding model is loaded with `local_files_only`; ticket creation and console email still work, and drafts fall back to the template.
+
 ## Architecture
 
 ```text
@@ -92,12 +100,14 @@ Ticket resolution commits first, then emits a user-scoped SSE invalidation and a
 - I store the JWT in localStorage. For this internal tool I accept the XSS exposure in exchange for avoiding CSRF. Refresh tokens and rotation remain future work. The backend still verifies every role and ownership decision.
 - Public registration can only create an employee. Agent accounts come from seed or operations, never from self-serve signup.
 - I use `require_role()` as a dependency factory so every protected route shares one authorization choke point.
-- I use query-param JWT authentication for SSE because browser `EventSource` cannot set an Authorization header. I run one Uvicorn worker because the hub is in-process; Redis pub/sub is required for multiple workers.
+- I use Server-Sent Events for live ticket updates, not Socket.io and not a native WebSocket. The dashboard and My Tickets only need the server to push an invalidation; the browser never sends ticket data upstream on that channel. SSE stays on the existing HTTP API, passes through the Vite dev server and the nginx `/api/` proxy (`proxy_buffering off`), and `EventSource` reconnects on its own. Socket.io would add a second realtime server and a client library for a channel this app does not use in both directions. A raw WebSocket would need its own upgrade route, heartbeat, and reconnect code to deliver the same signal. `EventSource` cannot set an `Authorization` header, so `GET /api/events` takes the JWT as a query parameter. The hub is in-process, so Uvicorn runs with `--workers 1`; opening the stream refetches REST, which recovers any event missed during a reconnect. Redis pub/sub would be required before adding workers.
 - I use SQL aggregates and PostgreSQL `percentile_cont(0.5)` for median resolution time. Override rate uses null-safe `IS DISTINCT FROM`, so fallback/null values do not create false overrides.
 - I use a hand-written `migrate.py` for the additive final-classification columns and `override_logs` table. The change is small enough that Alembic can wait.
-- I use `EMAIL_BACKEND=console` for the one selected stretch goal. The notifier builds a real plain-text resolution email and logs it after commit; SMTP is a documented swap, not an unimplemented claim.
+- I use `EMAIL_BACKEND=console` for resolution mail. The notifier builds a plain-text email and logs it after commit; SMTP is a documented swap, not an unimplemented claim.
+- I store the model's `confidence` integer (0–100) on `tickets.ai_confidence` and show it beside the suggested category and priority. A missing or invalid score stays null. The no-key fallback does not invent a score.
+- I ship a Compose `full` profile for backend, frontend, and Postgres. Plain `docker compose up -d` still starts only Postgres so the host-run instructions keep working.
 
-I deliberately declined the other stretch goals: Dockerizing the full application adds deployment scope beyond the requested local Postgres container; AI confidence needs a reliable calibrated signal; rate limiting needs a deployment-wide store; and test-suite expansion is not a product feature for this phase.
+I declined rate limiting. It needs a store shared across workers, and this app is still one Uvicorn process.
 
 ## What I would do with more time
 
@@ -111,7 +121,7 @@ I would replace `migrate.py` with Alembic, move the SSE hub to Redis pub/sub for
 - The ticket title filter uses `ILIKE`, not a search index.
 - Without `NVIDIA_API_KEY`, reply drafts use a template grounded on retrieved KB excerpts when available; the API returns HTTP 200 with `degraded: true`. Live NVIDIA drafting requires a configured key and reachable provider.
 - JWTs are stored in localStorage and are not refreshable.
-- CORS currently allows the local Vite origin only.
+- CORS allows the local Vite origins (`http://localhost:5173` and `http://127.0.0.1:5173`) and the Compose UI origins (`http://localhost` and `http://127.0.0.1`). The event stream echoes `Access-Control-Allow-Origin` only for those origins.
 - The console notifier is a mock backend and does not send external email.
 
 ## Pre-submission smoke checklist

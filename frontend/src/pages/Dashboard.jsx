@@ -1,4 +1,62 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import client from "../api/client";
-export default function Dashboard() { const { user } = useAuth(); const [summary, setSummary] = useState(null); useEffect(() => { if (user?.role === "agent") client.get("/api/agents/summary").then(({ data }) => setSummary(data)); }, [user]); return <section className="content"><div className="eyebrow">WORKSPACE / OVERVIEW</div><h1>Good to see you, {user?.full_name.split(" ")[0]}.</h1><p className="lead">Authenticated as <strong>{user?.email}</strong> ({user?.role}).</p><div className="status-card"><span className="status-dot" />Your workspace is ready<span className="card-note">Ticket workflows arrive in Phase 2.</span></div>{summary && <div className="status-card"><strong>{summary.total_agents}</strong> agent account{summary.total_agents === 1 ? "" : "s"} active<span className="card-note">{summary.message}</span></div>}</section>; }
+
+export default function Dashboard() {
+  const { user } = useAuth();
+  const [summary, setSummary] = useState(null);
+
+  useEffect(() => {
+    if (user?.role === "agent") {
+      client
+        .get("/api/agents/summary")
+        .then(({ data }) => setSummary(data))
+        .catch(() => {});
+    }
+  }, [user]);
+
+  const isAgent = user?.role === "agent";
+
+  return (
+    <section className="page-container">
+      <header className="page-header">
+        <h1 className="page-title">
+          Welcome, {user?.full_name?.split(" ")[0] || "User"}.
+        </h1>
+      </header>
+
+      <div className="overview-card">
+        <p className="overview-user-info">
+          Signed in as <strong>{user?.email}</strong> ({user?.role}).
+        </p>
+
+        <div className="overview-status-item">
+          <span className="dot dot-resolved" />
+          <span>Internal support desk is online and active.</span>
+        </div>
+
+        {summary && (
+          <div className="overview-status-item">
+            <span>
+              <strong>{summary.total_agents}</strong> agent account
+              {summary.total_agents === 1 ? "" : "s"} active.
+            </span>
+          </div>
+        )}
+
+        <div className="overview-actions">
+          {isAgent ? (
+            <Link to="/dashboard" className="primary btn-primary">
+              View Queue
+            </Link>
+          ) : (
+            <Link to="/tickets/mine" className="primary btn-primary">
+              View My Tickets
+            </Link>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}

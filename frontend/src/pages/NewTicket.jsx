@@ -4,13 +4,85 @@ import client from "../api/client";
 
 export default function NewTicket() {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ title: "", description: "", attachment_filename: "" });
+  const [form, setForm] = useState({
+    title: "",
+    description: "",
+    attachment_filename: "",
+  });
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
   const submit = async (event) => {
     event.preventDefault();
     setError("");
-    try { await client.post("/api/tickets", { ...form, attachment_filename: form.attachment_filename || null }); navigate("/tickets/mine"); }
-    catch (err) { setError(err.response?.data?.detail || "Unable to submit ticket"); }
+    setSubmitting(true);
+    try {
+      await client.post("/api/tickets", {
+        ...form,
+        attachment_filename: form.attachment_filename.trim() || null,
+      });
+      navigate("/tickets/mine");
+    } catch (err) {
+      setError(err.response?.data?.detail || "Unable to submit ticket");
+    } finally {
+      setSubmitting(false);
+    }
   };
-  return <section className="content wide"><div className="eyebrow">SUPPORT / NEW TICKET</div><h1>Tell us what needs attention.</h1><p className="lead">Include enough detail for the support team to start investigating.</p><form className="ticket-form" onSubmit={submit}><label>Title<input maxLength="200" required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></label><label>Description<textarea maxLength="5000" required value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label><label>Attachment filename <span className="muted">(optional; no upload)</span><input maxLength="255" value={form.attachment_filename} onChange={(e) => setForm({ ...form, attachment_filename: e.target.value })} /></label>{error && <p className="error">{error}</p>}<button className="primary">Submit ticket</button></form></section>;
+
+  return (
+    <section className="page-container">
+      <div className="single-column-form-wrap">
+        <h1 className="page-title">New ticket</h1>
+        <form onSubmit={submit} className="form-column" noValidate>
+          <div className="form-group">
+            <label htmlFor="ticket-title">Title</label>
+            <input
+              id="ticket-title"
+              maxLength={200}
+              required
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="ticket-desc">Description</label>
+            <textarea
+              id="ticket-desc"
+              rows={6}
+              maxLength={5000}
+              required
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="ticket-attachment">Attachment name</label>
+            <input
+              id="ticket-attachment"
+              maxLength={255}
+              value={form.attachment_filename}
+              onChange={(e) =>
+                setForm({ ...form, attachment_filename: e.target.value })
+              }
+              placeholder="e.g. system_logs.txt"
+            />
+          </div>
+
+          {error && <div className="form-error" role="alert">{error}</div>}
+
+          <div className="form-actions">
+            <button
+              type="submit"
+              className="primary btn-primary"
+              disabled={submitting}
+            >
+              {submitting ? "Submitting..." : "Submit"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
+  );
 }

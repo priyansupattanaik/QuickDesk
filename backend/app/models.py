@@ -1,7 +1,7 @@
 import enum
 import uuid
 from datetime import datetime
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, JSON, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, JSON, String, Text, func, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import JSONB
 from app.database import Base
@@ -53,6 +53,7 @@ class Ticket(Base):
     ai_category: Mapped[str] = mapped_column(String(20), default="Other", server_default="Other", nullable=False)
     ai_priority: Mapped[str] = mapped_column(String(10), default="Medium", server_default="Medium", nullable=False)
     ai_classified: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true", nullable=False)
+    ai_confidence: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ai_draft: Mapped[str | None] = mapped_column(Text)
     ai_citations: Mapped[list[dict] | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
     final_reply: Mapped[str | None] = mapped_column(Text)
