@@ -19,7 +19,7 @@ if (Get-Command openssl -ErrorAction SilentlyContinue) { openssl rand -hex 32 } 
 
 Put the printed value in `JWT_SECRET_KEY` in `.env`. OpenSSL is the preferred generator. The Python fallback is in the same command because a normal Windows PATH often includes Git but not `openssl.exe`. Leave `NVIDIA_API_KEY` empty to use classification and draft fallbacks (template drafts with a `degraded` flag), or add a key from [build.nvidia.com](https://build.nvidia.com) for live NVIDIA NIM replies. The assignment brief listed several LLM vendors; this repo uses **NVIDIA NIM** via the OpenAI-compatible client. No key belongs in Git.
 
-**Knowledge base index and embeddings (first run):** On startup, `backend/app/main.py` calls `rebuild_index()`, which reads seeded KB articles from Postgres and writes a local Chroma collection under `backend/chroma_db/` (gitignored). The first successful run downloads `sentence-transformers/all-MiniLM-L6-v2` into your Hugging Face cache (~90MB). If the model or index is missing, retrieval returns no chunks and drafts still succeed in degraded mode. Re-run `python seed.py` then restart Uvicorn to rebuild after an empty database.
+**Knowledge base index and embeddings (first run):** On startup, `backend/app/main.py` calls `rebuild_index()`, which reads seeded KB articles from Postgres and writes a local Chroma collection under `backend/chroma_db/` (gitignored). The first successful run downloads `sentence-transformers/all-MiniLM-L6-v2` into your Hugging Face cache (~90MB). If the model or index is missing, the service uses a grounded lexical fallback over the same Postgres articles, so drafts still succeed with citations. Re-run `python seed.py` then restart Uvicorn to rebuild after an empty database.
 
 ```powershell
 Set-Location backend
@@ -107,7 +107,18 @@ Ticket resolution commits first, then emits a user-scoped SSE invalidation and a
 - I store the model's `confidence` integer (0–100) on `tickets.ai_confidence` and show it beside the suggested category and priority. A missing or invalid score stays null. The no-key fallback does not invent a score.
 - I ship a Compose `full` profile for backend, frontend, and Postgres. Plain `docker compose up -d` still starts only Postgres so the host-run instructions keep working.
 
-I declined rate limiting. It needs a store shared across workers, and this app is still one Uvicorn process.
+## Assignment questions a–h
+
+- **a. React vs Next:** I chose React with Vite because this is a role-based internal SPA: the browser needs fast authenticated transitions, not SEO, server rendering, or a second server layer. Next would be reasonable if SSR, public pages, or server-side route handling became requirements.
+- **b. RAG structure:** Seeded Markdown articles are stored in Postgres, split with LangChain's `RecursiveCharacterTextSplitter` at 500 characters with 50 characters of overlap, embedded with `all-MiniLM-L6-v2`, and retrieved from Chroma with `k=3` and a 0.2 threshold. If embeddings are unavailable, lexical overlap over the same Postgres articles is the grounded fallback. The prompt contains only retrieved excerpts and requires an explicit no-match response.
+- **c. Invalid LLM category:** The classifier validates categories and priorities against the backend allowlists. Invalid JSON or values get one JSON-only retry; if that still fails, the ticket uses `Other`/`Medium` and records that the result was not AI-classified.
+- **d. JWT storage:** The frontend stores the access token in `localStorage` for this assessment because it avoids CSRF complexity and keeps the API client simple. That accepts the XSS tradeoff; a production hardening pass would use HTTPS, short-lived access tokens, refresh-token rotation, and a carefully scoped cookie strategy.
+- **e. Backend RBAC:** `get_current_user` authenticates the token, `require_role` protects agent-only routers, and ticket ownership is checked in the ticket service. Guessing an agent URL therefore still reaches the backend guard and returns `403`; hiding a button is not the security boundary.
+- **f. Realtime choice:** I chose SSE because queue updates are one-way server-to-browser invalidations and `EventSource` reconnects automatically. On disconnect or reconnect the client refetches the REST list, so a missed event is recoverable. The in-process hub is intentionally one-worker; Redis or a broker would be the next step for multi-worker deployment.
+- **g. Worst failure mode:** Provider or embedding failure is the most important degraded path. Ticket creation and grounded lexical drafts still work, while live provider failures fall back without inventing citations. Production mitigation would add a cached model, provider timeouts/retries, circuit breaking, and metrics; authentication and ownership remain backend-controlled.
+- **h. AI help and harm:** AI accelerated the initial routes, UI, tests, and RAG scaffolding, but it also introduced integration mistakes such as filtering on the wrong status field, broad SSE payloads, an ownership edge case, a 502 on missing provider configuration, and hiding the draft after resolution. Human review, targeted tests, and live probes caught and corrected those issues.
+
+Rate limiting is intentionally declined because it needs a store shared across workers. Test-suite expansion was implemented: the backend suite contains 39 tests covering authentication, ownership, classification, replies, metrics, notifications, and realtime publication.
 
 ## What I would do with more time
 
@@ -119,7 +130,7 @@ I would replace `migrate.py` with Alembic, move the SSE hub to Redis pub/sub for
 - SSE accepts a query-param token for browser compatibility. Production should use HTTPS and short-lived access tokens.
 - ChromaDB rebuilds when the server starts; there is no live knowledge-base refresh endpoint.
 - The ticket title filter uses `ILIKE`, not a search index.
-- Without `NVIDIA_API_KEY`, reply drafts use a template grounded on retrieved KB excerpts when available; the API returns HTTP 200 with `degraded: true`. Live NVIDIA drafting requires a configured key and reachable provider.
+- Without `NVIDIA_API_KEY`, reply drafts use a degraded template grounded on retrieved KB excerpts, using lexical retrieval when the local embedding model is unavailable; the API returns HTTP 200 with `degraded: true`. Live NVIDIA drafting requires a configured key and reachable provider.
 - JWTs are stored in localStorage and are not refreshable.
 - CORS allows the local Vite origins (`http://localhost:5173` and `http://127.0.0.1:5173`) and the Compose UI origins (`http://localhost` and `http://127.0.0.1`). The event stream echoes `Access-Control-Allow-Origin` only for those origins.
 - The console notifier is a mock backend and does not send external email.
@@ -155,4 +166,4 @@ Fresh-clone verification on Windows, following the commands in this README:
 - PostgreSQL 16.15
 - Vite 6.4.3
 
-`python -m pytest -q -p no:cacheprovider tests` from `backend` in that virtual environment reported 34 passed. `npm run build` completed. One Uvicorn worker reached `Application startup complete`, loaded the local MiniLM weights, and `GET /api/health` returned 200. `npm run dev` served `http://127.0.0.1:5173/` with 200. The seeded employee login returned 200. The browser checklist above was not clicked through.
+`python -m pytest -q -p no:cacheprovider tests` from `backend` reported 39 passed with 3 deprecation warnings. `npm run build` completed successfully with Vite 6.4.3. `docker compose --profile full up --build -d` built and started PostgreSQL 16, the API, and nginx. `GET /api/health` returned `{"status":"ok"}`. The live seeded logins returned 200, bcrypt prefixes in PostgreSQL were `$2b$12$`, both seed passes were idempotent, the VPN draft returned non-empty citations, and the no-match draft explicitly reported no matching article. The browser checklist itself remains a human click-through.

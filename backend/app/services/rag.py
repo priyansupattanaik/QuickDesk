@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 _store: Chroma | None = None
 _collection_name = "quickdesk_kb"
 _persist_directory = Path(__file__).resolve().parents[2] / "chroma_db"
+_stop_words = {"the", "and", "for", "with", "that", "this", "from", "your", "have", "will", "need", "into", "are", "not", "our"}
 
 
 def rebuild_index() -> None:
@@ -39,9 +41,9 @@ def rebuild_index() -> None:
             collection_name=_collection_name,
             persist_directory=str(_persist_directory),
         )
-    except Exception:
+    except Exception as exc:
         _store = None
-        logger.exception("Knowledge base index could not be built")
+        logger.warning("Knowledge base embeddings unavailable; using lexical retrieval fallback: %s", exc)
 
 
 def get_relevant_chunks(ticket: Ticket) -> list[Document]:
@@ -49,9 +51,31 @@ def get_relevant_chunks(ticket: Ticket) -> list[Document]:
     if _store is None:
         rebuild_index()
     if _store is None:
-        return []
+        return _lexical_fallback(ticket)
     retriever = _store.as_retriever(search_type="similarity_score_threshold", search_kwargs={"k": 3, "score_threshold": 0.2})
     return retriever.invoke(f"{ticket.title}\n{ticket.description}")
+
+
+def _lexical_fallback(ticket: Ticket) -> list[Document]:
+    """Use grounded article text when the optional local embedding model is unavailable."""
+    query_terms = {
+        term for term in re.findall(r"[a-z0-9]+", f"{ticket.title} {ticket.description}".lower())
+        if len(term) >= 3 and term not in _stop_words
+    }
+    if not query_terms:
+        return []
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    ranked: list[tuple[int, Document]] = []
+    with SessionLocal() as db:
+        articles = db.scalars(select(KBArticle).order_by(KBArticle.slug)).all()
+        for article in articles:
+            for chunk in splitter.split_text(article.content):
+                terms = set(re.findall(r"[a-z0-9]+", chunk.lower()))
+                score = len(query_terms & terms)
+                if score:
+                    ranked.append((score, Document(page_content=chunk, metadata={"article_id": str(article.id), "title": article.title})))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [document for _score, document in ranked[:3]]
 
 
 def citations_for(chunks: list[Document]) -> list[dict[str, str]]:

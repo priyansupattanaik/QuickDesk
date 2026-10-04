@@ -3,7 +3,9 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install the CPU torch wheel explicitly so the container does not pull CUDA runtimes.
+RUN pip install --no-cache-dir --timeout 180 --retries 8 torch --index-url https://download.pytorch.org/whl/cpu \
+ && pip install --no-cache-dir --timeout 180 --retries 8 -r requirements.txt
 
 COPY . .
 

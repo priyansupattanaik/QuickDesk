@@ -156,6 +156,10 @@ export default function Login() {
   return (
     <AuthSplitLayout title="Sign in">
       <div className="auth-tabs" role="tablist" aria-label="Sign in as">
+        <div
+          className={`auth-tab-pill ${role === "agent" ? "tab-agent" : "tab-employee"}`}
+          aria-hidden="true"
+        />
         {ROLES.map((item) => (
           <button
             key={item.id}
@@ -163,7 +167,7 @@ export default function Login() {
               tabRefs.current[item.id] = node;
             }}
             type="button"
-            className="auth-tab"
+            className={`auth-tab ${role === item.id ? "active" : ""}`}
             role="tab"
             id={`login-tab-${item.id}`}
             aria-selected={role === item.id}
@@ -182,7 +186,6 @@ export default function Login() {
         id="login-panel"
         aria-labelledby={`login-tab-${role}`}
         className="auth-panel"
-        key={role}
       >
         <p className="auth-lede">{selected.lede}</p>
 
@@ -250,16 +253,18 @@ export default function Login() {
           </button>
         </div>
 
-        {role === "employee" ? (
-          <div className="auth-switch">
-            <span>New employee? </span>
-            <Link to="/register">Create an employee account</Link>
-          </div>
-        ) : (
-          <p className="auth-note">
-            Agent accounts are issued by the desk. Creating an account is for employees.
-          </p>
-        )}
+        <div className="auth-role-footer">
+          {role === "employee" ? (
+            <div className="auth-switch">
+              <span>New employee? </span>
+              <Link to="/register">Create an employee account</Link>
+            </div>
+          ) : (
+            <p className="auth-note">
+              Agent accounts are issued by the desk. Creating an account is for employees.
+            </p>
+          )}
+        </div>
       </div>
     </AuthSplitLayout>
   );
