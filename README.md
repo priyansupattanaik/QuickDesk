@@ -1,41 +1,55 @@
-# QuickDesk
+﻿# QuickDesk
 
 ## What this is
 
-QuickDesk is an internal helpdesk where employees submit tickets and agents classify, search, draft, resolve, and measure support work. FastAPI is the authority for roles, ownership, classification values, resolution state, and audit history; React provides the two role-specific workspaces.
+QuickDesk is an internal helpdesk SPA: employees submit tickets, FastAPI classifies them with Groq (keyword fallback if the key is missing), agents override category/priority, pull a RAG-grounded draft from six seeded Markdown articles, resolve the ticket, and watch open/resolved/median/override metrics. Passwords are bcrypt-hashed; access is JWT-based with role checks on the backend. React + Vite is the UI; PostgreSQL is the store; LangChain + Chroma (MiniLM embeddings) plus a lexical fallback power retrieval; live queue updates use SSE with one Uvicorn worker.
 
 ## How to run locally
 
-Run PostgreSQL with Docker, then run the FastAPI backend and React/Vite frontend on the host. This keeps the local embedding cache and one-worker SSE hub on the same machine.
+Documented path: **Postgres via Docker**, then **FastAPI and Vite on the host**. Do not use `docker compose --profile full` for the graded run â€” that profile is optional packaging only.
 
-### 1. Create `.env`
+### Prerequisites
 
-From the repository root in PowerShell:
+- Docker Desktop (or Docker Engine + Compose)
+- Python 3.11+ (3.12 is fine)
+- Node.js 18+ and npm
+- A free-tier [Groq Cloud](https://console.groq.com/) API key for AI reply drafts (and preferred classification)
+
+### 1. Clone and create `.env`
 
 ```powershell
+git clone <your-repo-url> QuickDesk
+Set-Location QuickDesk
 Copy-Item .env.example .env
 notepad .env
 ```
 
-Set these values in `.env`:
+Set at least:
 
 ```env
+DATABASE_URL=postgresql+psycopg://quickdesk:quickdesk@localhost:5432/quickdesk
 JWT_SECRET_KEY=quickdesk
-NVIDIA_API_KEY=your_nvidia_key_here
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
 QUICKDESK_ENV=dev
+EMAIL_BACKEND=console
+GROQ_API_KEY=
+GROQ_MODEL=qwen/qwen3.8-27b
 ```
 
-`JWT_SECRET_KEY=quickdesk` is acceptable for a private local demo. For a shared or deployed environment, use a random value generated with `openssl rand -hex 32` or Python’s `secrets.token_hex(32)`. Keep `.env` private and never commit API keys or passwords.
+Paste your Groq key after `GROQ_API_KEY=` (never commit `.env`). `GROQ_MODEL` defaults to `qwen/qwen3.8-27b` on the Groq free tier â€” the same default as `backend/app/config.py` and `.env.example`.
 
-### 2. Start PostgreSQL with Docker
+`JWT_SECRET_KEY=quickdesk` is fine for a private local demo. For anything shared, use `openssl rand -hex 32` or Python `secrets.token_hex(32)`. If `JWT_SECRET_KEY` is empty and `QUICKDESK_ENV=dev`, the API generates an ephemeral secret at startup (restarts invalidate tokens).
+
+### 2. Start PostgreSQL
 
 ```powershell
 docker compose up -d
 ```
 
-Compose creates the PostgreSQL database and user from `docker-compose.yml`. No manual database creation is required. If local PostgreSQL is already using port `5432`, stop it before starting Docker PostgreSQL.
+This starts only the `db` service (`postgres:16`, user/db `quickdesk`, port `5432`). Stop any other Postgres already bound to `5432` first.
 
-### 3. Start the backend
+### 3. Backend (migrate, seed, one worker)
 
 ```powershell
 python -m venv .venv
@@ -48,143 +62,189 @@ python seed.py
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-**Knowledge base index and embeddings (first run):** On startup, `backend/app/main.py` calls `rebuild_index()`, which reads seeded KB articles from Postgres and writes a local Chroma collection under `backend/chroma_db/` (gitignored). The first successful run downloads `sentence-transformers/all-MiniLM-L6-v2` into your Hugging Face cache (~90MB). If the model or index is missing, the service uses a grounded lexical fallback over the same Postgres articles, so drafts still succeed with citations. Re-run `python seed.py` then restart Uvicorn to rebuild after an empty database.
+Keep this terminal open. Health check: `http://127.0.0.1:8000/api/health`.
 
-Use one Uvicorn worker because the SSE hub is process-local. Keep this terminal running. The API health check is available at `http://127.0.0.1:8000/api/health`.
+**On first successful startup**, `rebuild_index()` in `backend/app/main.py` loads seeded KB articles from Postgres, splits them, and writes a local Chroma collection under `backend/chroma_db/` (gitignored). It downloads Hugging Face `sentence-transformers/all-MiniLM-L6-v2` once into your HF cache (~90MB) for **embeddings only**. Chat classification and RAG drafts call **Groq** with `GROQ_API_KEY`. If embeddings/Chroma fail, retrieval falls back to lexical search over the same articles. Draft generation **requires** Groq and returns a clear error if the key is missing (no invented policy text). After reseeding an empty DB, restart Uvicorn so the index rebuilds.
 
-### 4. Start the frontend
+Use **`--workers 1`**: the SSE hub in `backend/app/realtime.py` is process-local.
 
-Open a second terminal:
+### 4. Frontend
+
+Second terminal:
 
 ```powershell
-Set-Location "D:\My Creations\QuickDesk\frontend"
+Set-Location frontend
 npm install
 npm run dev
 ```
 
 Open `http://localhost:5173`.
 
-The seeded credentials are:
+### Seeded accounts
 
-| Role | Email | Password |
-| --- | --- | --- |
-| Agent | `agent@quickdesk.dev` | `Agent#Pass1` |
+| Role     | Email                    | Password         |
+| -------- | ------------------------ | ---------------- |
+| Agent    | `agent@quickdesk.dev`    | `Agent#Pass1`    |
 | Employee | `employee@quickdesk.dev` | `Employee#Pass1` |
 
-The console notifier is selected by default with `EMAIL_BACKEND=console`; it logs a mock email and does not send external email. Do not run another PostgreSQL service on port `5432` or another backend on port `8000` at the same time.
+`EMAIL_BACKEND=console` logs a mock resolution email to the backend console; it does not send real mail.
 
-Stop the backend with `Ctrl+C`, then stop PostgreSQL after the demo:
+### Stop
+
+`Ctrl+C` in the Uvicorn terminal, then:
 
 ```powershell
 docker compose down
 ```
 
-The PostgreSQL data remains in the Docker volume until it is explicitly removed. To remove the database volume as well, use `docker compose down -v`.
+Add `-v` only if you also want to wipe the Postgres volume.
 
 ## Architecture
 
 ```text
-Employee browser ── REST + localStorage JWT ──┐
-                                              v
-Agent browser ◀── SSE invalidation ─── FastAPI :8000
-       │                                      │
-       │                                      ├── SQLAlchemy ── Postgres :5432
-       │                                      ├── ChromaDB + local MiniLM
-       │                                      └── console mock notifier
-       │
-React/Vite :5173 ◀── REST refetch on SSE open/events
+                    +---------------------------+
+ Employee / Agent   |  React + Vite :5173       |
+ browsers           |  REST + localStorage JWT  |
+                    |  EventSource (SSE)        |
+                    +-------------+-------------+
+                                  |
+                     REST Bearer / SSE ?token=
+                                  v
+                    +---------------------------+
+                    |  FastAPI (Uvicorn :8000)  |
+                    |  JWT + bcrypt + require_role|
+                    |  in-process SSE hub       |
+                    +--+----------+----------+--+
+                       |          |          |
+                       v          v          v
+                 PostgreSQL   Chroma +     Groq chat
+                 :5432        MiniLM       api.groq.com
+                 tickets,     (local       classify +
+                 users, KB    chroma_db)   RAG drafts
+                              + lexical
+                              fallback
 ```
 
-Ticket resolution commits first, then emits a user-scoped SSE invalidation and attempts the console mock email. Notification failure is logged and cannot roll back the already committed reply. SSE is an in-process hub; clients refetch REST data so events are signals, not the source of truth.
+**RAG path (agent â€œGenerate AI draftâ€):** ticket title/description â†’ hybrid retrieve (dense Chroma + IDF lexical, RRF, top 3 chunks) â†’ validate chunk text against Postgres article â†’ expand to full article text for the prompt â†’ Groq draft â†’ reject ungrounded URLs / bad no-match replies â†’ save `ai_draft` + citations.
+
+Resolution commits first, then console notify + user-scoped SSE. Notify failure cannot roll back the reply. SSE events are invalidation signals; REST is the source of truth.
+
+## Stack (as implemented)
+
+| Layer | Choice |
+| ----- | ------ |
+| Frontend | React 18 + Vite 6 + React Router (not Next.js) |
+| Backend | Python FastAPI + Uvicorn |
+| Database | PostgreSQL 16 (Docker) |
+| Auth | JWT (HS256, 60 min) + bcrypt password hashes |
+| LLM | Groq free tier, model `qwen/qwen3.8-27b` (override via `GROQ_MODEL`) |
+| RAG | LangChain text splitter + HuggingFace MiniLM embeddings + Chroma; lexical fallback |
+| Realtime | Server-Sent Events (`GET /api/events`) |
 
 ## API endpoints
 
 | Method | Path | Purpose | Auth |
-| --- | --- | --- | --- |
-| GET | `/api/health` | Health check | Public |
+| ------ | ---- | ------- | ---- |
+| GET | `/api/health` | Liveness | Public |
 | POST | `/api/auth/register` | Register an employee | Public |
-| POST | `/api/auth/login` | Issue a JWT and return the user | Public |
-| GET | `/api/auth/me` | Return the signed-in user | Authenticated |
-| POST | `/api/auth/change-password` | Change the signed-in user's password | Authenticated |
-| GET | `/api/agents/summary` | Return agent summary data | Agent |
-| GET | `/api/events?token=...` | Stream ticket invalidation events | Authenticated query-param JWT |
-| GET | `/api/metrics` | Return status, category, median, and override metrics | Agent |
-| GET | `/api/kb/articles/{id}` | Open the authenticated source article behind a citation | Agent |
-| POST | `/api/tickets` | Create and classify a ticket | Employee or agent |
-| GET | `/api/tickets/mine` | List the signed-in employee's tickets | Employee or agent |
-| GET | `/api/tickets` | Filter and paginate the agent queue | Agent |
-| GET | `/api/tickets/{id}` | Return ticket detail and audit history | Agent or owning employee |
-| PATCH | `/api/tickets/{id}/classification` | Override final category and/or priority | Agent |
-| POST | `/api/tickets/{id}/ai-draft` | Retrieve citations and save an AI draft | Agent |
-| POST | `/api/tickets/{id}/reply` | Save final reply and resolve the ticket | Agent |
+| POST | `/api/auth/login` | Issue JWT + user summary | Public |
+| GET | `/api/auth/me` | Current user | Bearer JWT |
+| POST | `/api/auth/change-password` | Change own password | Bearer JWT |
+| GET | `/api/agents/summary` | Tiny agent-only probe | Agent |
+| GET | `/api/events?token=...` | SSE invalidation stream | JWT query param |
+| GET | `/api/metrics` | Status counts, categories, median resolution, override rate | Agent |
+| GET | `/api/kb/articles/{id}` | Full KB article for a citation | Agent |
+| POST | `/api/tickets` | Create ticket + classify | Employee or agent |
+| GET | `/api/tickets/mine` | List own tickets | Employee or agent |
+| GET | `/api/tickets` | Agent queue (filter/paginate) | Agent |
+| GET | `/api/tickets/{id}` | Ticket detail + override history | Agent, or owning employee |
+| PATCH | `/api/tickets/{id}/classification` | Override final category/priority | Agent |
+| POST | `/api/tickets/{id}/ai-draft` | Retrieve + Groq draft + citations | Agent |
+| POST | `/api/tickets/{id}/reply` | Final reply, resolve, notify, SSE | Agent |
 
-## Decisions and tradeoffs
+## Decisions and Tradeoffs
 
-- I use ChromaDB in local persistent mode instead of FAISS because this six-article corpus needs a directory-backed collection and document metadata without another service. The retrieval behavior remains local and the index is rebuilt on startup.
-- I use `sentence-transformers/all-MiniLM-L6-v2` locally. LangChain's `RecursiveCharacterTextSplitter` creates 500-character chunks with 50-character overlap. Retrieval fuses dense Chroma matches with an IDF-weighted lexical rank, then applies deterministic reciprocal-rank fusion and returns at most three evidence chunks.
-- Each citation is validated against the current PostgreSQL article before it is persisted. The agent can click a citation and open the authenticated `/kb/{id}` source page, which displays the exact stored article content. A generated answer that contains unsupported vocabulary fails the conservative grounding check and is replaced by a grounded fallback draft.
-- I use NVIDIA NIM through the OpenAI-compatible client with the configured `meta/llama-3.2-11b-vision-instruct` model. Provider, parse, timeout, and validation failures fall back to `Other`/`Medium` and never block ticket creation.
-- I keep `ai_category` and `ai_priority` as the original model output and store agent decisions in `final_category` and `final_priority`. `override_logs` records each changed field, old value, new value, agent, and timestamp.
-- I use the `bcrypt` package directly. passlib is unmaintained, and its version check breaks against bcrypt 4.x.
-- I use PyJWT instead of python-jose. python-jose has the weaker maintenance path and the CVE history I did not want in this service. Access tokens expire after 60 minutes.
-- I store the JWT in localStorage. For this internal tool I accept the XSS exposure in exchange for avoiding CSRF. Refresh tokens and rotation remain future work. The backend still verifies every role and ownership decision.
-- Public registration can only create an employee. Agent accounts come from seed or operations, never from self-serve signup.
-- I use `require_role()` as a dependency factory so every protected route shares one authorization choke point.
-- I use Server-Sent Events for live ticket updates, not Socket.io and not a native WebSocket. The dashboard and My Tickets only need the server to push an invalidation; the browser never sends ticket data upstream on that channel. SSE stays on the existing HTTP API, passes through the Vite dev server and the nginx `/api/` proxy (`proxy_buffering off`), and `EventSource` reconnects on its own. Socket.io would add a second realtime server and a client library for a channel this app does not use in both directions. A raw WebSocket would need its own upgrade route, heartbeat, and reconnect code to deliver the same signal. `EventSource` cannot set an `Authorization` header, so `GET /api/events` takes the JWT as a query parameter. The hub is in-process, so Uvicorn runs with `--workers 1`; opening the stream refetches REST, which recovers any event missed during a reconnect. Redis pub/sub would be required before adding workers.
-- I use SQL aggregates and PostgreSQL `percentile_cont(0.5)` for median resolution time. Override rate uses null-safe `IS DISTINCT FROM`, so fallback/null values do not create false overrides.
-- I use a hand-written `migrate.py` for the additive final-classification columns and `override_logs` table. The change is small enough that Alembic can wait.
-- I use `EMAIL_BACKEND=console` for resolution mail. The notifier builds a plain-text email and logs it after commit; SMTP is a documented swap, not an unimplemented claim.
-- I store the model's `confidence` integer (0–100) on `tickets.ai_confidence` and show it beside the suggested category and priority. A missing or invalid score stays null. The no-key fallback does not invent a score.
-- I ship a Compose `full` profile for backend, frontend, and Postgres. The documented local workflow uses that profile so the complete application starts consistently with one command.
+### a) Why React + Vite, not Next.js?
 
-## Assignment questions a–h
+QuickDesk is a signed-in internal tool with two role workspaces (employee vs agent), not a public marketing site. There is no SEO requirement and no need for server-rendered pages. FastAPI already owns auth, classification, RAG, and resolution. Adding Next.js would mean a second Node server and deployment path for the same SPA routes (login, my tickets, agent queue, ticket detail, metrics). Vite + React Router keeps the frontend as a thin authenticated client against `/api/*`.
 
-- **a. React vs Next:** I chose React with Vite because this is a role-based internal SPA: the browser needs fast authenticated transitions, not SEO, server rendering, or a second server layer. Next would be reasonable if SSR, public pages, or server-side route handling became requirements.
-- **b. RAG structure:** Seeded Markdown articles are stored in Postgres and split with LangChain's `RecursiveCharacterTextSplitter` at 500 characters with 50 characters of overlap. `all-MiniLM-L6-v2` provides dense Chroma candidates, while an IDF-weighted lexical search provides sparse candidates. The two ranked lists are fused with reciprocal-rank fusion and reduced to at most three evidence chunks. Citations are checked against the stored article, and generated replies pass a conservative grounding check; otherwise the system uses a grounded fallback or abstains.
-- **c. Invalid LLM category:** The classifier validates categories and priorities against the backend allowlists. Invalid JSON or values get one JSON-only retry; if that still fails, the ticket uses `Other`/`Medium` and records that the result was not AI-classified.
-- **d. JWT storage:** The frontend stores the access token in `localStorage` for this assessment because it avoids CSRF complexity and keeps the API client simple. That accepts the XSS tradeoff; a production hardening pass would use HTTPS, short-lived access tokens, refresh-token rotation, and a carefully scoped cookie strategy.
-- **e. Backend RBAC:** `get_current_user` authenticates the token, `require_role` protects agent-only routers, and ticket ownership is checked in the ticket service. Guessing an agent URL therefore still reaches the backend guard and returns `403`; hiding a button is not the security boundary.
-- **f. Realtime choice:** I chose SSE because queue updates are one-way server-to-browser invalidations and `EventSource` reconnects automatically. On disconnect or reconnect the client refetches the REST list, so a missed event is recoverable. The in-process hub is intentionally one-worker; Redis or a broker would be the next step for multi-worker deployment.
-- **g. Worst failure mode:** Provider or embedding failure is the most important degraded path. Ticket creation and grounded lexical drafts still work, while live provider failures fall back without inventing citations. Production mitigation would add a cached model, provider timeouts/retries, circuit breaking, and metrics; authentication and ownership remain backend-controlled.
-- **h. AI help and harm:** AI accelerated the initial routes, UI, and RAG scaffolding, but it also introduced integration mistakes such as filtering on the wrong status field, broad SSE payloads, an ownership edge case, a 502 on missing provider configuration, and hiding the draft after resolution. Human review and live probes caught and corrected those issues.
+### b) How is the RAG pipeline structured?
 
-Rate limiting is intentionally declined because it needs a store shared across workers. Automated test files are not included in this deployment-oriented copy; use the smoke checklist below for manual verification.
+Seeded Markdown under `backend/kb/` is loaded into Postgres by `seed.py` (six articles). On startup, `rebuild_index()` splits article content with LangChain `RecursiveCharacterTextSplitter` at **chunk_size=500**, **chunk_overlap=50**. Embeddings use local Hugging Face **`sentence-transformers/all-MiniLM-L6-v2`** into a persistent Chroma collection `quickdesk_kb` under `backend/chroma_db/` (cosine space).
+
+Retrieval for a ticket (`get_relevant_chunks` in `rag.py`):
+
+1. Build query = title + description.
+2. **Dense:** Chroma `similarity_search_with_relevance_scores`, keep scores **â‰¥ 0.2**, up to 8.
+3. **Lexical:** IDF-weighted term scores; require **â‰¥ 2** overlapping content terms (stop words / generic words stripped); top 8.
+4. **Fuse** with reciprocal-rank fusion (`1/(60+rank)`), keep at most **3** chunks.
+5. `grounded_context` reloads full article bodies from Postgres and drops citations whose chunk text is not a substring of the stored article.
+6. `generate_reply` in `llm.py` prompts Groq with those excerpts only: no invented URLs/policies; if no excerpts, the model must say there is no documented knowledge yet and that we will look into it and get back â€” otherwise the draft is rejected and nothing is saved.
+
+### c) Invalid LLM category / priority?
+
+Allowlists in `llm.py`: categories `{IT, HR, Finance, Admin, Other}`, priorities `{Low, Medium, High}`. Groq is asked for JSON with only those labels. `_normalize_classification` returns `None` if either label is off-list; classify then falls back to keyword scoring. Keyword miss (no term hits) or total classify failure stores **Other / Medium** and `ai_classified=False`. Agents still own `final_category` / `final_priority` via the override endpoint.
+
+### d) Where is the JWT stored on the client, and why?
+
+In **`localStorage`** under key `quickdesk_token` (`AuthContext.jsx` + axios interceptor in `api/client.js`). That avoids CSRF complexity for a Bearer SPA and keeps `EventSource` able to pass the same token as `?token=` (browsers cannot set `Authorization` on EventSource). Tradeoff: any XSS can read the token. Acceptable for this assessment; production would want HTTPS, shorter TTLs, refresh rotation, and a tighter cookie strategy.
+
+### e) Backend RBAC â€” what stops an employee guessing an agent URL?
+
+UI route guards (`Protected` in `App.jsx`) only hide pages. Real enforcement is FastAPI: `get_current_user` validates the JWT; `require_role("agent")` protects agent list, metrics, KB article, classification override, AI draft, and reply. Ticket `GET /{id}` allows an agent or the **owning** employee (`employee_id` check â†’ 403 otherwise). Guessing `/api/tickets` or `/api/metrics` with an employee token still returns **403**. Hiding a nav link is not the security boundary.
+
+### f) Why SSE instead of Socket.io / WebSockets? Disconnect failure mode?
+
+Updates are one-way server â†’ browser invalidations (`ticket_created` to agents, `ticket_resolved` to the employee). `EventSource` reconnects with backoff in `useTicketEvents.js`; on open/error the UI refetches REST. Socket.io would add another realtime stack and bidirectional protocol we do not need. A raw WebSocket would need custom heartbeat/reconnect for the same signal.
+
+**Failure mode:** the hub is an in-process `asyncio.Queue` set (`realtime.py`). With multiple Uvicorn workers, events published in worker A are invisible to connections on worker B â€” hence **`--workers 1`**. If the stream drops mid-session, the client may miss an event until reconnect + REST refetch. A full queue (max 50) drops that connection. Redis pub/sub (or similar) would be required before scaling workers.
+
+### g) Worst failure mode today, and what I would do?
+
+**Worst:** SSE disconnect / multi-worker miss leaves an employee staring at **Open** after an agent resolved the ticket, until they refresh or the EventSource recovers and refetches. Closely related: a missing or broken `GROQ_API_KEY` blocks AI drafts entirely (clear 503, no saved draft) while ticket create still works via keyword classify.
+
+**Address:** move the hub to Redis (or Postgres NOTIFY) so workers share events; add a short-lived â€œlast event idâ€ or periodic poll on the employee My Tickets page; for Groq, retries/backoff and a dashboard health flag when the key/model fails.
+
+### h) Where AI tools helped, and where they hurt?
+
+AI scaffolding got FastAPI routers, React pages, and the LangChain/Chroma shape standing quickly, which mattered under a short deadline. It also left integration landmines that only showed up when walking the real agent queue: optimistic SSE inserts still reason about **`ai_category` / `ai_priority`** while the list API filters on **`final_category` / `final_priority`**, so a filtered queue can disagree with a live insert; employee ticket deep-links and ownership edge cases needed another human pass after the generated UI looked â€œdone.â€ I treat generated code as a first draft and verify every role path against the live API before calling a feature finished.
 
 ## What I would do with more time
 
-I would replace `migrate.py` with Alembic, move the SSE hub to Redis pub/sub for multi-worker deployment, add a real SMTP provider with delivery handling, add a PostgreSQL `pg_trgm` search index for titles, and add refresh-token rotation.
+- Replace hand-rolled `migrate.py` with Alembic.
+- Move SSE fan-out to Redis pub/sub (or equivalent) and allow multiple workers.
+- Fix the agent-queue live-insert filter to use final classification fields consistently with `GET /api/tickets`.
+- Add real SMTP behind `EMAIL_BACKEND`, with delivery failure surfacing in the UI.
+- Add `pg_trgm` (or similar) for title search instead of bare `ILIKE`.
+- Refresh-token rotation and stop putting long-lived JWTs only in `localStorage`.
+- Automated API + a couple of Playwright role flows; right now verification is the manual smoke path.
+- Record and link the 3â€“5 minute demo video (recording outline lives at `docs/demo-recording.html`).
 
 ## Known issues / limitations
 
-- The SSE hub is process-local and requires one worker. Events are invalidation signals; REST refetch is the recovery path.
-- SSE accepts a query-param token for browser compatibility. Production should use HTTPS and short-lived access tokens.
-- ChromaDB rebuilds when the server starts; there is no live knowledge-base refresh endpoint.
-- The ticket title filter uses `ILIKE`, not a search index.
-- Without `NVIDIA_API_KEY`, reply drafts use a degraded template grounded on retrieved KB excerpts, using lexical retrieval when the local embedding model is unavailable; the API returns HTTP 200 with `degraded: true`. Live NVIDIA drafting requires a configured key and reachable provider.
-- JWTs are stored in localStorage and are not refreshable.
-- CORS allows the local Vite origins (`http://localhost:5173` and `http://127.0.0.1:5173`) and the Compose UI origins (`http://localhost` and `http://127.0.0.1`). The event stream echoes `Access-Control-Allow-Origin` only for those origins.
-- The console notifier is a mock backend and does not send external email.
+- **No demo video in the repo yet** â€” use `docs/demo-recording.html` as the shot list when recording.
+- Documented Compose path is **Postgres only**; `backend` / `frontend` services sit behind Compose profile `full` and are optional, not the graded workflow.
+- SSE hub is process-local â†’ must run Uvicorn with one worker.
+- SSE auth uses a query-string JWT because EventSource cannot send Bearer headers.
+- Chroma index rebuilds on process start; there is no live â€œreindex KBâ€ API.
+- Title search is `ILIKE`, not indexed full-text.
+- Agent dashboard live `ticket_created` handling still compares filters to **`ai_*`** fields while REST listing filters **`final_*`** â€” can disagree after overrides or with filters on.
+- JWTs in `localStorage`, no refresh tokens; default expiry 60 minutes.
+- Console notifier only; no outbound email.
+- Groq outage or empty `GROQ_API_KEY` â†’ draft endpoint errors; classification can still keyword-fallback.
+- Stretch goals are capped at two (below). Full Compose is packaging, not a stretch claim.
+
+### Stretch goals (2/2)
+
+1. **Console resolution email** â€” `EMAIL_BACKEND=console` builds and logs a plain-text mock mail after a successful resolve commit.
+2. **AI confidence** â€” `tickets.ai_confidence` (0â€“100, nullable) from Groq or keyword match strength, shown next to suggested category/priority.
 
 ## Pre-submission smoke checklist
 
-Run this before recording the demo. Use `http://localhost:5173`, the seeded credentials above, and two browser profiles so both role sessions stay independent.
-
-1. In the first profile, open `http://localhost:5173/login`, enter `employee@quickdesk.dev` / `Employee#Pass1`, click **Sign in**, open **New ticket**, enter title `VPN access request` and description `I need VPN access for a production incident`, then click **Submit ticket**. Expected: the ticket appears in **My tickets** with status **Open**.
-2. In the second profile, open `http://localhost:5173/login`, sign in as `agent@quickdesk.dev` / `Agent#Pass1`, and open **Ticket dashboard**. Expected: the new ticket appears without refreshing the page, proving the `ticket_created` SSE invalidation.
-3. Set the dashboard category filter to a category different from the new ticket's displayed category. Expected: the ticket disappears. Set the category filter back to **All categories**. Expected: it returns.
-4. Open the ticket detail, click **Generate AI draft**, and wait for the draft. Expected: the textarea contains a draft and at least one citation chip is visible. If no NVIDIA key is configured, record the documented provider limitation instead of claiming this step passed.
-5. Edit the draft textarea by adding a sentence, then click **Send reply**. Expected: the detail shows **Resolved** and the edited text is the final reply.
-6. Return to **My tickets** in the employee profile. Expected: the ticket changes to **Resolved** without refreshing, proving the `ticket_resolved` SSE invalidation.
-7. As the employee, submit a second ticket titled `Badge printer jam` with description `The lobby badge printer is jammed`. Seed data has users and articles only, so this is the other open ticket. In the agent profile, open that ticket from the dashboard without refreshing, change its category, and click **Save override**. Expected: **Overridden** appears, the original AI values remain visible, and **Override history** contains the agent entry.
-8. Open `/metrics` as the agent. Expected: open/resolved counts reflect the actions, median resolution is present once a ticket is resolved, and override rate reflects the changed classification.
-9. Stop Uvicorn with `Ctrl+C`, start it again with the documented one-worker command, and revisit both pages. Expected: both pages recover their state from REST without manual data repair.
-10. Watch the backend console while resolving a ticket. Expected: one `---------- MOCK EMAIL ----------` block shows the employee recipient, subject, body, and closing delimiter.
-11. Click **Log out** in both profiles, then click **Sign in** again with the same credentials. Expected: each role returns to its permitted workspace and cannot access the other role's navigation or protected endpoints.
-
-## Where AI helped and where it hurt
-
-AI sped up scaffolding (routes, React pages, and KB markdown) and produced a workable RAG + classification shape. Human review and live probes corrected integration issues such as filtering on the wrong status field, broad SSE payloads, ownership checks, missing-provider handling, and hiding the draft after resolution. The repository contains no recorded demo video.
-
-## Verification
-
-This copy does not ship automated test files. Use the manual smoke checklist above after starting Postgres, the backend, and the frontend. The browser steps require human interaction and are not claimed as agent-completed verification.
+1. Employee login â†’ New ticket (e.g. VPN / production) â†’ appears Open under My tickets.
+2. Agent login â†’ queue shows the ticket without a full page reload (SSE).
+3. Agent opens ticket â†’ Generate AI draft â†’ draft text + citation chip(s).
+4. Edit draft â†’ Send reply â†’ Resolved; employee My tickets flips to Resolved via SSE.
+5. Override category on another ticket â†’ â€œchangedâ€ / override history; Metrics override rate moves.
+6. Backend console shows a `MOCK EMAIL` block on resolve.
+7. Logout / login again; employee cannot call agent-only APIs successfully.

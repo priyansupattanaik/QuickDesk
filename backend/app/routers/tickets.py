@@ -11,9 +11,9 @@ from app.database import get_db
 from app.models import OverrideLog, Ticket, TicketStatus, User
 from app.schemas import ClassificationOverride, TicketCreate, TicketListResponse, TicketReply, TicketResponse
 from app.realtime import publish
-from app.services.llm import classify_ticket, generate_degraded_draft, generate_reply
+from app.services.llm import DraftGenerationError, classify_ticket, generate_reply
 from app.services.notifier import notify_resolution
-from app.services.rag import citations_for, get_relevant_chunks
+from app.services.rag import get_relevant_chunks, grounded_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
@@ -121,25 +121,35 @@ def override_classification(ticket_id: UUID, payload: ClassificationOverride, us
 @router.post("/{ticket_id}/ai-draft")
 def draft(ticket_id: UUID, user: User = Depends(require_role("agent")), db: Session = Depends(get_db)) -> dict:
     ticket = _get_ticket(ticket_id, db)
-    degraded = False
     try:
         chunks = get_relevant_chunks(ticket)
-        citations = citations_for(chunks)
-        draft_text = generate_reply(ticket, chunks)
+        chunks, citations = grounded_context(chunks)
     except Exception:
-        logger.exception("AI draft generation failed; using degraded template draft")
-        try:
-            chunks = get_relevant_chunks(ticket)
-            citations = citations_for(chunks)
-        except Exception:
-            chunks = []
-            citations = []
-        draft_text = generate_degraded_draft(ticket, chunks)
-        degraded = True
+        logger.exception("Knowledge-base retrieval failed; AI draft was not generated")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Knowledge-base retrieval failed. No draft was generated.",
+        )
+
+    try:
+        draft_text = generate_reply(ticket, chunks)
+    except DraftGenerationError as exc:
+        logger.warning("Draft generation refused or misconfigured: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        logger.exception("Draft generation failed")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="A draft could not be generated. No draft was saved.",
+        ) from exc
+
     ticket.ai_draft = draft_text
     ticket.ai_citations = citations
     db.commit()
-    return {"ai_draft": draft_text, "citations": citations, "degraded": degraded}
+    return {"ai_draft": draft_text, "citations": citations}
 
 
 @router.post("/{ticket_id}/reply", response_model=TicketResponse)

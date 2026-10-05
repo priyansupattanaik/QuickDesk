@@ -36,9 +36,10 @@ export default function TicketDetail() {
               ai_draft: draftData.ai_draft,
               ai_citations: draftData.citations,
             }));
-          } catch {
+          } catch (err) {
             setDraft("");
             setCitations([]);
+            setError(err.response?.data?.detail || "Unable to generate draft");
           } finally {
             setLoading(false);
           }
