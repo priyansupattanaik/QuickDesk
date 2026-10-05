@@ -78,6 +78,7 @@ Ticket resolution commits first, then emits a user-scoped SSE invalidation and a
 | POST | `/api/auth/register` | Register an employee | Public |
 | POST | `/api/auth/login` | Issue a JWT and return the user | Public |
 | GET | `/api/auth/me` | Return the signed-in user | Authenticated |
+| POST | `/api/auth/change-password` | Change the signed-in user's password | Authenticated |
 | GET | `/api/agents/summary` | Return agent summary data | Agent |
 | GET | `/api/events?token=...` | Stream ticket invalidation events | Authenticated query-param JWT |
 | GET | `/api/metrics` | Return status, category, median, and override metrics | Agent |
@@ -112,7 +113,7 @@ Ticket resolution commits first, then emits a user-scoped SSE invalidation and a
 ## Assignment questions a–h
 
 - **a. React vs Next:** I chose React with Vite because this is a role-based internal SPA: the browser needs fast authenticated transitions, not SEO, server rendering, or a second server layer. Next would be reasonable if SSR, public pages, or server-side route handling became requirements.
-- **b. RAG structure:** Seeded Markdown articles are stored in Postgres, split with LangChain's `RecursiveCharacterTextSplitter` at 500 characters with 50 characters of overlap, embedded with `all-MiniLM-L6-v2`, and retrieved from Chroma with `k=3` and a 0.2 threshold. If embeddings are unavailable, lexical overlap over the same Postgres articles is the grounded fallback. The prompt contains only retrieved excerpts and requires an explicit no-match response.
+- **b. RAG structure:** Seeded Markdown articles are stored in Postgres and split with LangChain's `RecursiveCharacterTextSplitter` at 500 characters with 50 characters of overlap. `all-MiniLM-L6-v2` provides dense Chroma candidates, while an IDF-weighted lexical search provides sparse candidates. The two ranked lists are fused with reciprocal-rank fusion and reduced to at most three evidence chunks. Citations are checked against the stored article, and generated replies pass a conservative grounding check; otherwise the system uses a grounded fallback or abstains.
 - **c. Invalid LLM category:** The classifier validates categories and priorities against the backend allowlists. Invalid JSON or values get one JSON-only retry; if that still fails, the ticket uses `Other`/`Medium` and records that the result was not AI-classified.
 - **d. JWT storage:** The frontend stores the access token in `localStorage` for this assessment because it avoids CSRF complexity and keeps the API client simple. That accepts the XSS tradeoff; a production hardening pass would use HTTPS, short-lived access tokens, refresh-token rotation, and a carefully scoped cookie strategy.
 - **e. Backend RBAC:** `get_current_user` authenticates the token, `require_role` protects agent-only routers, and ticket ownership is checked in the ticket service. Guessing an agent URL therefore still reaches the backend guard and returns `403`; hiding a button is not the security boundary.
@@ -120,7 +121,7 @@ Ticket resolution commits first, then emits a user-scoped SSE invalidation and a
 - **g. Worst failure mode:** Provider or embedding failure is the most important degraded path. Ticket creation and grounded lexical drafts still work, while live provider failures fall back without inventing citations. Production mitigation would add a cached model, provider timeouts/retries, circuit breaking, and metrics; authentication and ownership remain backend-controlled.
 - **h. AI help and harm:** AI accelerated the initial routes, UI, tests, and RAG scaffolding, but it also introduced integration mistakes such as filtering on the wrong status field, broad SSE payloads, an ownership edge case, a 502 on missing provider configuration, and hiding the draft after resolution. Human review, targeted tests, and live probes caught and corrected those issues.
 
-Rate limiting is intentionally declined because it needs a store shared across workers. Test-suite expansion was implemented: the backend suite contains 39 tests covering authentication, ownership, classification, replies, metrics, notifications, and realtime publication.
+Rate limiting is intentionally declined because it needs a store shared across workers. Test-suite expansion was implemented: the backend suite contains 53 tests covering authentication, ownership, classification, replies, metrics, notifications, RAG safeguards, and realtime publication.
 
 ## What I would do with more time
 
@@ -168,4 +169,4 @@ Fresh-clone verification on Windows, following the commands in this README:
 - PostgreSQL 16.15
 - Vite 6.4.3
 
-`python -m pytest -q -p no:cacheprovider tests` from `backend` reported 39 passed with 3 deprecation warnings. `npm run build` completed successfully with Vite 6.4.3. `docker compose --profile full up --build -d` built and started PostgreSQL 16, the API, and nginx. `GET /api/health` returned `{"status":"ok"}`. The live seeded logins returned 200, bcrypt prefixes in PostgreSQL were `$2b$12$`, both seed passes were idempotent, the VPN draft returned non-empty citations, and the no-match draft explicitly reported no matching article. The browser checklist itself remains a human click-through.
+`python -m pytest -q -p no:cacheprovider` reported 53 passed with 3 deprecation warnings. `npm run build` completed successfully with Vite 6.4.3. `docker compose --profile full up --build -d` built and started PostgreSQL 16, the API, and nginx. `GET /api/health` returned `{"status":"ok"}`. The live seeded logins returned 200, bcrypt prefixes in PostgreSQL were `$2b$12$`, both seed passes were idempotent, the VPN draft returned non-empty citations, and the no-match draft explicitly reported no matching article. The browser checklist itself remains a human click-through.

@@ -356,10 +356,6 @@ a:hover {
   transform: translateY(-50%) translateX(0);
 }
 
-.nav-action {
-  margin-top: 8px;
-}
-
 .rail-user-container {
   position: relative;
   margin-top: auto;
@@ -1824,35 +1820,6 @@ a.citation-title:focus-visible {
   background-color: var(--accent-teal);
   border-radius: 99px;
   min-width: 3px;
-}
-
-/* Dashboard Overview Card */
-.overview-card {
-  background-color: var(--surface-card);
-  border: 1px solid var(--border-subtle);
-  border-radius: 8px;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.overview-user-info {
-  margin: 0;
-  font-size: 14px;
-  color: var(--text-muted);
-}
-
-.overview-status-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13.5px;
-  color: var(--text-ink);
-}
-
-.overview-actions {
-  margin-top: 8px;
 }
 
 /* Loading & 404 */
