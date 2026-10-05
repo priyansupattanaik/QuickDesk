@@ -6,47 +6,89 @@ QuickDesk is an internal helpdesk where employees submit tickets and agents clas
 
 ## How to run locally
 
-Run these commands from the repository root in this order. `npm install` belongs in `frontend`; it does not install Python or PostgreSQL dependencies.
+The application has three parts: PostgreSQL, the FastAPI backend, and the React/Vite frontend. `npm install` installs only the frontend packages; it does not install Python packages or PostgreSQL.
+
+### 1. Configure the environment
+
+Run these commands from the repository root in PowerShell:
 
 ```powershell
-docker compose up -d
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r backend/requirements.txt
-Copy-Item .env.example .env
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+```
+
+For local development, a simple value such as `JWT_SECRET_KEY=quickdesk` works. For a shared or deployed environment, use a random value instead:
+
+```powershell
 if (Get-Command openssl -ErrorAction SilentlyContinue) { openssl rand -hex 32 } else { python -c "import secrets; print(secrets.token_hex(32))" }
 ```
 
-Put the printed value in `JWT_SECRET_KEY` in `.env`. OpenSSL is the preferred generator. The Python fallback is in the same command because a normal Windows PATH often includes Git but not `openssl.exe`. Leave `NVIDIA_API_KEY` empty to use classification and draft fallbacks (template drafts with a `degraded` flag), or add a key from [build.nvidia.com](https://build.nvidia.com) for live NVIDIA NIM replies. The assignment brief listed several LLM vendors; this repo uses **NVIDIA NIM** via the OpenAI-compatible client. No key belongs in Git.
+Copy the printed value into `JWT_SECRET_KEY` in `.env`. The command prints a 32-byte secret as 64 hexadecimal characters; it does not edit `.env`. Keep `.env` private and never commit API keys or passwords. Leave `NVIDIA_API_KEY` empty to use classification and draft fallbacks, or add a key from [build.nvidia.com](https://build.nvidia.com) for live NVIDIA NIM replies.
 
-**Knowledge base index and embeddings (first run):** On startup, `backend/app/main.py` calls `rebuild_index()`, which reads seeded KB articles from Postgres and writes a local Chroma collection under `backend/chroma_db/` (gitignored). The first successful run downloads `sentence-transformers/all-MiniLM-L6-v2` into your Hugging Face cache (~90MB). If the model or index is missing, the service uses a grounded lexical fallback over the same Postgres articles, so drafts still succeed with citations. Re-run `python seed.py` then restart Uvicorn to rebuild after an empty database.
+### 2. Start PostgreSQL
+
+Use either Docker or a local PostgreSQL installation, not both on port `5432`.
+
+With Docker:
 
 ```powershell
+docker compose up -d
+```
+
+With PostgreSQL installed as a Windows service, create a database and user matching the `DATABASE_URL` in `.env`, then start the service:
+
+```powershell
+Get-Service *postgres*
+Start-Service postgresql-x64-*
+```
+
+If they do not already exist, create the database and user in `psql` or pgAdmin:
+
+```sql
+CREATE USER quickdesk WITH PASSWORD 'quickdesk';
+CREATE DATABASE quickdesk OWNER quickdesk;
+```
+
+### 3. Start the backend
+
+Run this in the first terminal:
+
+```powershell
+Set-Location "D:\My Creations\QuickDesk"
+if (-not (Test-Path .venv)) { python -m venv .venv }
+.\.venv\Scripts\Activate.ps1
+pip install -r backend/requirements.txt
 Set-Location backend
 python migrate.py
 python seed.py
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
-Use one Uvicorn worker because the Phase 3 SSE hub is process-local. In another terminal, from the repository root:
+Use one Uvicorn worker because the SSE hub is process-local. `migrate.py` creates or updates the schema, and `seed.py` creates the demo users and knowledge-base articles. Both are safe to run repeatedly.
+
+### 4. Start the frontend
+
+Run this in a second terminal:
 
 ```powershell
-Set-Location frontend
+Set-Location "D:\My Creations\QuickDesk\frontend"
 npm install
-npm run build
 npm run dev
 ```
 
-Open `http://localhost:5173`. The seeded credentials are:
+Open `http://localhost:5173`. `npm run build` is an optional production-build check; it is not required for the Vite development server.
+
+**Knowledge base index and embeddings (first run):** On startup, `backend/app/main.py` calls `rebuild_index()`, which reads seeded KB articles from Postgres and writes a local Chroma collection under `backend/chroma_db/` (gitignored). The first successful run downloads `sentence-transformers/all-MiniLM-L6-v2` into your Hugging Face cache (~90MB). If the model or index is missing, the service uses a grounded lexical fallback over the same Postgres articles, so drafts still succeed with citations. Re-run `python seed.py` then restart Uvicorn to rebuild after an empty database.
+
+The seeded credentials are:
 
 | Role | Email | Password |
 | --- | --- | --- |
 | Agent | `agent@quickdesk.dev` | `Agent#Pass1` |
 | Employee | `employee@quickdesk.dev` | `Employee#Pass1` |
 
-`python migrate.py` creates the schema on an empty database and adds the final-classification columns when `tickets` already exists. It is safe to run repeatedly, and it must run before `seed.py`. The console notifier is selected by default with `EMAIL_BACKEND=console`; a real SMTP implementation is the documented future swap.
+The console notifier is selected by default with `EMAIL_BACKEND=console`; a real SMTP implementation is the documented future swap. The API and Vite app run on the host so the local MiniLM cache and one-worker SSE hub stay on this machine.
 
-The command above starts only Postgres. The API and Vite app still run on the host so the local MiniLM cache and one-worker SSE hub stay on this machine. To run the whole stack in containers instead:
+To run the whole stack in containers instead:
 
 ```powershell
 docker compose --profile full up --build
@@ -119,7 +161,7 @@ Ticket resolution commits first, then emits a user-scoped SSE invalidation and a
 - **e. Backend RBAC:** `get_current_user` authenticates the token, `require_role` protects agent-only routers, and ticket ownership is checked in the ticket service. Guessing an agent URL therefore still reaches the backend guard and returns `403`; hiding a button is not the security boundary.
 - **f. Realtime choice:** I chose SSE because queue updates are one-way server-to-browser invalidations and `EventSource` reconnects automatically. On disconnect or reconnect the client refetches the REST list, so a missed event is recoverable. The in-process hub is intentionally one-worker; Redis or a broker would be the next step for multi-worker deployment.
 - **g. Worst failure mode:** Provider or embedding failure is the most important degraded path. Ticket creation and grounded lexical drafts still work, while live provider failures fall back without inventing citations. Production mitigation would add a cached model, provider timeouts/retries, circuit breaking, and metrics; authentication and ownership remain backend-controlled.
-- **h. AI help and harm:** AI accelerated the initial routes, UI, tests, and RAG scaffolding, but it also introduced integration mistakes such as filtering on the wrong status field, broad SSE payloads, an ownership edge case, a 502 on missing provider configuration, and hiding the draft after resolution. Human review, targeted tests, and live probes caught and corrected those issues.
+- **h. AI help and harm:** AI accelerated the initial routes, UI, and RAG scaffolding, but it also introduced integration mistakes such as filtering on the wrong status field, broad SSE payloads, an ownership edge case, a 502 on missing provider configuration, and hiding the draft after resolution. Human review and live probes caught and corrected those issues.
 
 Rate limiting is intentionally declined because it needs a store shared across workers. Automated test files are not included in this deployment-oriented copy; use the smoke checklist below for manual verification.
 
