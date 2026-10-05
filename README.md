@@ -6,76 +6,39 @@ QuickDesk is an internal helpdesk where employees submit tickets and agents clas
 
 ## How to run locally
 
-The application has three parts: PostgreSQL, the FastAPI backend, and the React/Vite frontend. `npm install` installs only the frontend packages; it does not install Python packages or PostgreSQL.
+Run the complete application with Docker Compose. This starts PostgreSQL, the FastAPI backend, and the frontend together; no manual database creation, Python virtual environment, or frontend `npm install` is required.
 
-### 1. Configure the environment
+### 1. Create `.env`
 
-Run these commands from the repository root in PowerShell:
+From the repository root in PowerShell:
 
 ```powershell
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-For local development, a simple value such as `JWT_SECRET_KEY=quickdesk` works. For a shared or deployed environment, use a random value instead:
+Set these values in `.env`:
+
+```env
+JWT_SECRET_KEY=quickdesk
+QUICKDESK_ENV=dev
+NVIDIA_API_KEY=your_nvidia_key_here
+```
+
+`JWT_SECRET_KEY=quickdesk` is acceptable for a private local demo. For a shared or deployed environment, use a random value generated with `openssl rand -hex 32` or Python’s `secrets.token_hex(32)`. Keep `.env` private and never commit API keys or passwords.
+
+### 2. Start the full stack
 
 ```powershell
-if (Get-Command openssl -ErrorAction SilentlyContinue) { openssl rand -hex 32 } else { python -c "import secrets; print(secrets.token_hex(32))" }
+docker compose --profile full up --build -d
 ```
 
-Copy the printed value into `JWT_SECRET_KEY` in `.env`. The command prints a 32-byte secret as 64 hexadecimal characters; it does not edit `.env`. Keep `.env` private and never commit API keys or passwords. Leave `NVIDIA_API_KEY` empty to use classification and draft fallbacks, or add a key from [build.nvidia.com](https://build.nvidia.com) for live NVIDIA NIM replies.
+Compose creates the PostgreSQL database and user from `docker-compose.yml`, runs the backend migration and seed steps, and serves the frontend through the containerized web server. The first build may take time while Python and the embedding dependencies are downloaded.
 
-### 2. Start PostgreSQL
-
-Use either Docker or a local PostgreSQL installation, not both on port `5432`.
-
-With Docker:
+Open `http://localhost`. To watch backend logs during a demo:
 
 ```powershell
-docker compose up -d
+docker compose logs -f backend
 ```
-
-With PostgreSQL installed as a Windows service, create a database and user matching the `DATABASE_URL` in `.env`, then start the service:
-
-```powershell
-Get-Service *postgres*
-Start-Service postgresql-x64-*
-```
-
-If they do not already exist, create the database and user in `psql` or pgAdmin:
-
-```sql
-CREATE USER quickdesk WITH PASSWORD 'quickdesk';
-CREATE DATABASE quickdesk OWNER quickdesk;
-```
-
-### 3. Start the backend
-
-Run this in the first terminal:
-
-```powershell
-Set-Location "D:\My Creations\QuickDesk"
-if (-not (Test-Path .venv)) { python -m venv .venv }
-.\.venv\Scripts\Activate.ps1
-pip install -r backend/requirements.txt
-Set-Location backend
-python migrate.py
-python seed.py
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
-```
-
-Use one Uvicorn worker because the SSE hub is process-local. `migrate.py` creates or updates the schema, and `seed.py` creates the demo users and knowledge-base articles. Both are safe to run repeatedly.
-
-### 4. Start the frontend
-
-Run this in a second terminal:
-
-```powershell
-Set-Location "D:\My Creations\QuickDesk\frontend"
-npm install
-npm run dev
-```
-
-Open `http://localhost:5173`. `npm run build` is an optional production-build check; it is not required for the Vite development server.
 
 **Knowledge base index and embeddings (first run):** On startup, `backend/app/main.py` calls `rebuild_index()`, which reads seeded KB articles from Postgres and writes a local Chroma collection under `backend/chroma_db/` (gitignored). The first successful run downloads `sentence-transformers/all-MiniLM-L6-v2` into your Hugging Face cache (~90MB). If the model or index is missing, the service uses a grounded lexical fallback over the same Postgres articles, so drafts still succeed with citations. Re-run `python seed.py` then restart Uvicorn to rebuild after an empty database.
 
@@ -86,15 +49,15 @@ The seeded credentials are:
 | Agent | `agent@quickdesk.dev` | `Agent#Pass1` |
 | Employee | `employee@quickdesk.dev` | `Employee#Pass1` |
 
-The console notifier is selected by default with `EMAIL_BACKEND=console`; a real SMTP implementation is the documented future swap. The API and Vite app run on the host so the local MiniLM cache and one-worker SSE hub stay on this machine.
+The console notifier is selected by default with `EMAIL_BACKEND=console`; it logs a mock email and does not send external email. The frontend is served at `http://localhost`, while the API is available on port `8000` for health checks. Do not run another PostgreSQL service on port `5432` or another backend on port `8000` at the same time.
 
-To run the whole stack in containers instead:
+Stop the stack after the demo:
 
 ```powershell
-docker compose --profile full up --build
+docker compose --profile full down
 ```
 
-That profile migrates, seeds the demo users and knowledge-base articles, and serves the UI at `http://localhost` with the API on port 8000. Do not run host Uvicorn on port 8000 at the same time. The first container start can log a knowledge-base miss because the embedding model is loaded with `local_files_only`; ticket creation and console email still work, and drafts fall back to the template.
+The PostgreSQL data remains in the Docker volume until it is explicitly removed. To remove the database volume as well, use `docker compose --profile full down -v`.
 
 ## Architecture
 
@@ -150,7 +113,7 @@ Ticket resolution commits first, then emits a user-scoped SSE invalidation and a
 - I use a hand-written `migrate.py` for the additive final-classification columns and `override_logs` table. The change is small enough that Alembic can wait.
 - I use `EMAIL_BACKEND=console` for resolution mail. The notifier builds a plain-text email and logs it after commit; SMTP is a documented swap, not an unimplemented claim.
 - I store the model's `confidence` integer (0–100) on `tickets.ai_confidence` and show it beside the suggested category and priority. A missing or invalid score stays null. The no-key fallback does not invent a score.
-- I ship a Compose `full` profile for backend, frontend, and Postgres. Plain `docker compose up -d` still starts only Postgres so the host-run instructions keep working.
+- I ship a Compose `full` profile for backend, frontend, and Postgres. The documented local workflow uses that profile so the complete application starts consistently with one command.
 
 ## Assignment questions a–h
 
@@ -198,7 +161,7 @@ Run this before recording the demo. Use `http://localhost:5173`, the seeded cred
 
 ## Where AI helped and where it hurt
 
-AI sped up scaffolding (routes, React pages, and KB markdown) and produced a workable RAG + classification shape. Human review and live probes corrected integration issues such as filtering on the wrong status field, broad SSE payloads, ownership checks, missing-provider handling, and hiding the draft after resolution. For a spoken walkthrough, use [docs/demo-outline.md](docs/demo-outline.md) — there is no demo video in the repository.
+AI sped up scaffolding (routes, React pages, and KB markdown) and produced a workable RAG + classification shape. Human review and live probes corrected integration issues such as filtering on the wrong status field, broad SSE payloads, ownership checks, missing-provider handling, and hiding the draft after resolution. The repository contains no recorded demo video.
 
 ## Verification
 
