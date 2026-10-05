@@ -144,7 +144,6 @@ export default function TicketDetail() {
       </div>
 
       <div className="ticket-detail-grid">
-        {/* Left Column: Request, Who sent it, Editable category & priority */}
         <div className="detail-col-left">
           <div className="ticket-header-group">
             <div className="ticket-title-row">
@@ -282,7 +281,6 @@ export default function TicketDetail() {
           )}
         </div>
 
-        {/* Right Column: The Reply, AI Draft, Citations, Send Reply at bottom */}
         <div className="detail-col-right">
           {isOpen ? (
             <div className="reply-editor-pane">

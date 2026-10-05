@@ -155,7 +155,6 @@ async def reply(ticket_id: UUID, payload: TicketReply, user: User = Depends(requ
     try:
         notify_resolution(resolved, user)
     except Exception:
-        # A notification failure must not undo a committed resolution.
         logger.exception("Resolution notification failed")
     await publish(f"user:{resolved.employee_id}", "ticket_resolved", {"ticket_id": str(resolved.id), "status": resolved.status.value, "resolved_at": resolved.resolved_at.isoformat()})
     return resolved

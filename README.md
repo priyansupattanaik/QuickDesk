@@ -6,7 +6,7 @@ QuickDesk is an internal helpdesk where employees submit tickets and agents clas
 
 ## How to run locally
 
-Run these commands from the repository root in this order.
+Run these commands from the repository root in this order. `npm install` belongs in `frontend`; it does not install Python or PostgreSQL dependencies.
 
 ```powershell
 docker compose up -d
@@ -121,7 +121,7 @@ Ticket resolution commits first, then emits a user-scoped SSE invalidation and a
 - **g. Worst failure mode:** Provider or embedding failure is the most important degraded path. Ticket creation and grounded lexical drafts still work, while live provider failures fall back without inventing citations. Production mitigation would add a cached model, provider timeouts/retries, circuit breaking, and metrics; authentication and ownership remain backend-controlled.
 - **h. AI help and harm:** AI accelerated the initial routes, UI, tests, and RAG scaffolding, but it also introduced integration mistakes such as filtering on the wrong status field, broad SSE payloads, an ownership edge case, a 502 on missing provider configuration, and hiding the draft after resolution. Human review, targeted tests, and live probes caught and corrected those issues.
 
-Rate limiting is intentionally declined because it needs a store shared across workers. Test-suite expansion was implemented: the backend suite contains 53 tests covering authentication, ownership, classification, replies, metrics, notifications, RAG safeguards, and realtime publication.
+Rate limiting is intentionally declined because it needs a store shared across workers. Automated test files are not included in this deployment-oriented copy; use the smoke checklist below for manual verification.
 
 ## What I would do with more time
 
@@ -156,17 +156,8 @@ Run this before recording the demo. Use `http://localhost:5173`, the seeded cred
 
 ## Where AI helped and where it hurt
 
-AI sped up scaffolding (routes, React pages, KB markdown, test stubs) and produced a workable RAG + classification shape. Humans and tests had to fix several integration mistakes: the agent queue filtered on `ai_*` while the UI showed `final_*`, the SSE hub broadcast agent-only `ticket_created` payloads (including other employees' emails) to every connected client, employees were linked to an agent-only ticket route, drafts returned 502 when `NVIDIA_API_KEY` or the local MiniLM index was missing, and the agent ticket page hid the AI draft after resolve. Those are corrected in this tree. For a spoken walkthrough, use [docs/demo-outline.md](docs/demo-outline.md) — there is no demo video in the repository.
+AI sped up scaffolding (routes, React pages, and KB markdown) and produced a workable RAG + classification shape. Human review and live probes corrected integration issues such as filtering on the wrong status field, broad SSE payloads, ownership checks, missing-provider handling, and hiding the draft after resolution. For a spoken walkthrough, use [docs/demo-outline.md](docs/demo-outline.md) — there is no demo video in the repository.
 
-## Tested on
+## Verification
 
-Fresh-clone verification on Windows, following the commands in this README:
-
-- Python 3.12.10
-- Node.js v24.19.0
-- npm 11.17.0
-- Docker Engine 29.8.1
-- PostgreSQL 16.15
-- Vite 6.4.3
-
-`python -m pytest -q -p no:cacheprovider` reported 53 passed with 3 deprecation warnings. `npm run build` completed successfully with Vite 6.4.3. `docker compose --profile full up --build -d` built and started PostgreSQL 16, the API, and nginx. `GET /api/health` returned `{"status":"ok"}`. The live seeded logins returned 200, bcrypt prefixes in PostgreSQL were `$2b$12$`, both seed passes were idempotent, the VPN draft returned non-empty citations, and the no-match draft explicitly reported no matching article. The browser checklist itself remains a human click-through.
+This copy does not ship automated test files. Use the manual smoke checklist above after starting Postgres, the backend, and the frontend. The browser steps require human interaction and are not claimed as agent-completed verification.

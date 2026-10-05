@@ -56,7 +56,6 @@ export default function Metrics() {
 
       {data && (
         <div className="metrics-body">
-          {/* Four numbers in a row */}
           <div className="metric-row-four">
             <div className="metric-stat">
               <span className="metric-label">Open</span>
@@ -85,7 +84,6 @@ export default function Metrics() {
             </div>
           </div>
 
-          {/* Under that, category counts as a simple bar list */}
           <div className="metric-section">
             <h2 className="section-title">Category breakdown</h2>
             <div className="bar-list">

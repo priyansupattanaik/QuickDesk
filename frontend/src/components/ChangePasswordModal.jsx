@@ -35,7 +35,6 @@ export default function ChangePasswordModal({ isOpen, onClose }) {
       setError("");
       setSuccess(false);
       setLoading(false);
-      // Auto-focus first input
       setTimeout(() => {
         oldPasswordInputRef.current?.focus();
       }, 50);

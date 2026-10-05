@@ -45,7 +45,6 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Vite dev server and the Compose frontend (port 80, so the origin has no port).
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",

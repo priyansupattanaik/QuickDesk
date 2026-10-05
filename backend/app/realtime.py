@@ -34,4 +34,3 @@ async def publish(channel: str, event: str, data: dict[str, Any]) -> None:
             connection.queue.put_nowait({"event": event, "data": data})
         except asyncio.QueueFull:
             _connections.discard(connection)
-            # A slow client must never stall the API; drop its connection instead.
