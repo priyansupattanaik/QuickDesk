@@ -121,13 +121,19 @@ def override_classification(ticket_id: UUID, payload: ClassificationOverride, us
 @router.post("/{ticket_id}/ai-draft")
 def draft(ticket_id: UUID, user: User = Depends(require_role("agent")), db: Session = Depends(get_db)) -> dict:
     ticket = _get_ticket(ticket_id, db)
-    chunks = get_relevant_chunks(ticket)
-    citations = citations_for(chunks)
     degraded = False
     try:
+        chunks = get_relevant_chunks(ticket)
+        citations = citations_for(chunks)
         draft_text = generate_reply(ticket, chunks)
     except Exception:
         logger.exception("AI draft generation failed; using degraded template draft")
+        try:
+            chunks = get_relevant_chunks(ticket)
+            citations = citations_for(chunks)
+        except Exception:
+            chunks = []
+            citations = []
         draft_text = generate_degraded_draft(ticket, chunks)
         degraded = True
     ticket.ai_draft = draft_text

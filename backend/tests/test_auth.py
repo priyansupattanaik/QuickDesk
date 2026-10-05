@@ -101,3 +101,76 @@ def test_agent_can_access_agent_summary():
     response = client.get("/api/agents/summary", headers={"Authorization": f"Bearer {token_for('agent@example.com', 'agent')}"})
     assert response.status_code == 200
     assert response.json()["message"] == "Agent-only endpoint reachable"
+
+
+def test_change_password_success():
+    register(email="pwdtest@example.com", password="OldPassword123", full_name="Pwd User")
+    login_resp = client.post("/api/auth/login", json={"email": "pwdtest@example.com", "password": "OldPassword123"})
+    assert login_resp.status_code == 200
+    token = login_resp.json()["access_token"]
+
+    change_resp = client.post(
+        "/api/auth/change-password",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"old_password": "OldPassword123", "new_password": "NewPassword456"},
+    )
+    assert change_resp.status_code == 200
+    assert change_resp.json()["message"] == "Password updated successfully"
+
+    # Old password no longer works
+    old_login = client.post("/api/auth/login", json={"email": "pwdtest@example.com", "password": "OldPassword123"})
+    assert old_login.status_code == 401
+
+    # New password works
+    new_login = client.post("/api/auth/login", json={"email": "pwdtest@example.com", "password": "NewPassword456"})
+    assert new_login.status_code == 200
+
+
+def test_change_password_wrong_old_password():
+    register(email="pwdtest2@example.com", password="OldPassword123", full_name="Pwd User 2")
+    login_resp = client.post("/api/auth/login", json={"email": "pwdtest2@example.com", "password": "OldPassword123"})
+    token = login_resp.json()["access_token"]
+
+    change_resp = client.post(
+        "/api/auth/change-password",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"old_password": "IncorrectPassword", "new_password": "NewPassword456"},
+    )
+    assert change_resp.status_code == 400
+    assert "Current password is incorrect" in change_resp.json()["detail"]
+
+
+def test_change_password_short_new_password():
+    register(email="pwdtest3@example.com", password="OldPassword123", full_name="Pwd User 3")
+    login_resp = client.post("/api/auth/login", json={"email": "pwdtest3@example.com", "password": "OldPassword123"})
+    token = login_resp.json()["access_token"]
+
+    change_resp = client.post(
+        "/api/auth/change-password",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"old_password": "OldPassword123", "new_password": "short"},
+    )
+    assert change_resp.status_code == 422
+
+
+def test_change_password_unauthorized():
+    change_resp = client.post(
+        "/api/auth/change-password",
+        json={"old_password": "OldPassword123", "new_password": "NewPassword456"},
+    )
+    assert change_resp.status_code == 401
+
+
+def test_change_password_same_as_old():
+    register(email="pwdsame@example.com", password="OldPassword123", full_name="Pwd Same")
+    login_resp = client.post("/api/auth/login", json={"email": "pwdsame@example.com", "password": "OldPassword123"})
+    token = login_resp.json()["access_token"]
+
+    change_resp = client.post(
+        "/api/auth/change-password",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"old_password": "OldPassword123", "new_password": "OldPassword123"},
+    )
+    assert change_resp.status_code == 400
+    assert "different from current password" in change_resp.json()["detail"]
+

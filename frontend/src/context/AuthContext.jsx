@@ -20,7 +20,11 @@ export function AuthProvider({ children }) {
     }
     localStorage.setItem("quickdesk_token", data.access_token);
     setUser(data.user);
-    navigate("/");
+    if (data.user.role === "agent") {
+      navigate("/dashboard", { replace: true });
+    } else {
+      navigate("/tickets/mine", { replace: true });
+    }
   };
   const logout = () => { localStorage.removeItem("quickdesk_token"); setUser(null); navigate("/login"); };
   return <AuthContext.Provider value={{ user, loading, login, logout }}>{children}</AuthContext.Provider>;

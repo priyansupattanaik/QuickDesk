@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
@@ -87,7 +87,7 @@ export function PasswordField({
 }
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, user, loading } = useAuth();
   const [role, setRole] = useState("employee");
   const [form, setForm] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
@@ -101,6 +101,14 @@ export default function Login() {
       tabRefs.current[role]?.focus();
     }
   }, [role]);
+
+  if (loading) {
+    return <div className="loading-state">Loading workspace...</div>;
+  }
+
+  if (user) {
+    return <Navigate to={user.role === "agent" ? "/dashboard" : "/tickets/mine"} replace />;
+  }
 
   const moveRole = (next) => {
     setRole(next);

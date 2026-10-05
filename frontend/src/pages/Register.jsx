@@ -1,14 +1,24 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { AuthSplitLayout, PasswordField } from "./Login";
 import { Loader2 } from "lucide-react";
+import { useAuth } from "../context/AuthContext";
 import client from "../api/client";
 
 export default function Register() {
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ email: "", full_name: "", password: "" });
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  if (loading) {
+    return <div className="loading-state">Loading workspace...</div>;
+  }
+
+  if (user) {
+    return <Navigate to={user.role === "agent" ? "/dashboard" : "/tickets/mine"} replace />;
+  }
 
   const submit = async (event) => {
     event.preventDefault();

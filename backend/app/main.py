@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import ALLOWED_ORIGINS
-from app.routers import agents, auth, events, health, metrics, tickets
+from app.routers import agents, auth, events, health, knowledge_base, metrics, tickets
 from app.services.rag import rebuild_index
 
 
@@ -24,3 +24,4 @@ app.include_router(agents.router)
 app.include_router(tickets.router)
 app.include_router(events.router)
 app.include_router(metrics.router)
+app.include_router(knowledge_base.router)

@@ -15,6 +15,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str = Field(min_length=8)
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -30,6 +35,15 @@ class UserSummary(BaseModel):
     email: EmailStr
     full_name: str
     role: UserRole
+
+
+class KBArticleResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    slug: str
+    title: str
+    content: str
+    created_at: datetime
 
 
 class LoginResponse(BaseModel):

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Inbox,
@@ -6,12 +6,16 @@ import {
   BarChart3,
   PlusSquare,
   LogOut,
+  User,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Menu,
   X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import ProfileModal from "./ProfileModal";
+import ChangePasswordModal from "./ChangePasswordModal";
 
 function getInitials(user) {
   if (user?.full_name?.trim()) {
@@ -41,6 +45,11 @@ export default function Layout() {
   });
 
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [changePasswordModalOpen, setChangePasswordModalOpen] = useState(false);
+
+  const profileContainerRef = useRef(null);
 
   const isAgent = user?.role === "agent";
   const isEmployee = user?.role === "employee";
@@ -67,7 +76,26 @@ export default function Layout() {
 
   useEffect(() => {
     setMobileOpen(false);
+    setMenuOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleOutsideClick = (e) => {
+      if (profileContainerRef.current && !profileContainerRef.current.contains(e.target)) {
+        setMenuOpen(false);
+      }
+    };
+    const handleEsc = (e) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleOutsideClick);
+    document.addEventListener("keydown", handleEsc);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener("keydown", handleEsc);
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -106,7 +134,14 @@ export default function Layout() {
         <div className="mobile-brand">
           <span className="brand-name">QuickDesk</span>
         </div>
-        <div className="mobile-user-avatar" title={user?.email}>
+        <div
+          className="mobile-user-avatar"
+          title={user?.full_name || user?.email}
+          onClick={() => setProfileModalOpen(true)}
+          role="button"
+          tabIndex={0}
+          aria-label="Open employee profile"
+        >
           {initials}
         </div>
       </header>
@@ -131,10 +166,24 @@ export default function Layout() {
             onClick={() => {
               if (collapsed) toggleSidebar();
             }}
-            title={collapsed ? "Expand sidebar (QD)" : "QuickDesk"}
+            title={collapsed ? "Expand sidebar" : "QuickDesk"}
+            data-tooltip={collapsed ? "Expand sidebar" : undefined}
+            role={collapsed ? "button" : undefined}
+            tabIndex={collapsed ? 0 : undefined}
+            aria-label={collapsed ? "QuickDesk — Click to expand sidebar" : "QuickDesk"}
+            onKeyDown={(e) => {
+              if (collapsed && (e.key === "Enter" || e.key === " ")) {
+                e.preventDefault();
+                toggleSidebar();
+              }
+            }}
           >
-            <span className="brand-name-full">QuickDesk</span>
-            <span className="brand-name-short">QD</span>
+            <span className="brand-wordmark" aria-label={collapsed ? "QD" : "QuickDesk"}>
+              <span className="brand-char brand-char-q">Q</span>
+              <span className="brand-chars-uick">uick</span>
+              <span className="brand-char brand-char-d">D</span>
+              <span className="brand-chars-esk">esk</span>
+            </span>
           </div>
 
           <button
@@ -143,6 +192,7 @@ export default function Layout() {
             onClick={toggleSidebar}
             aria-label={collapsed ? "Expand sidebar" : "Retract sidebar"}
             title={collapsed ? "Expand sidebar" : "Retract sidebar"}
+            tabIndex={collapsed ? -1 : 0}
           >
             {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
           </button>
@@ -217,30 +267,85 @@ export default function Layout() {
               </NavLink>
             </>
           )}
-
-          <button
-            type="button"
-            onClick={logout}
-            className="nav-item nav-action"
-            data-tooltip="Sign out"
-          >
-            <LogOut size={18} className="nav-icon" />
-            <span className="nav-text">Sign out</span>
-          </button>
         </nav>
 
-        <div
-          className="rail-user"
-          data-tooltip={`${user?.email || "User"} (${user?.role || ""})`}
-        >
-          <div className="rail-user-avatar" aria-hidden="true">
-            {initials}
-          </div>
-          <div className="rail-user-info">
-            <span className="user-email" title={user?.email}>
-              {user?.email}
-            </span>
-            <span className="user-role-badge">{user?.role}</span>
+        <div className="rail-user-container" ref={profileContainerRef}>
+          {menuOpen && (
+            <div
+              className={`rail-profile-popover ${collapsed ? "popover-collapsed" : ""}`}
+              role="menu"
+              aria-label="User account menu"
+            >
+              <div className="profile-popover-header">
+                <div className="profile-popover-avatar">{initials}</div>
+                <div className="profile-popover-user-meta">
+                  <span className="profile-popover-name" title={user?.full_name || "User"}>
+                    {user?.full_name || "User"}
+                  </span>
+                  <span className="profile-popover-email" title={user?.email}>
+                    {user?.email}
+                  </span>
+                </div>
+              </div>
+
+              <div className="profile-popover-divider" />
+
+              <button
+                type="button"
+                className="profile-popover-item"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setProfileModalOpen(true);
+                }}
+              >
+                <User size={16} className="profile-popover-icon" />
+                <span className="profile-popover-text">Profile</span>
+              </button>
+
+              <button
+                type="button"
+                className="profile-popover-item profile-popover-item-signout"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  logout();
+                }}
+              >
+                <LogOut size={16} className="profile-popover-icon" />
+                <span className="profile-popover-text">Sign out</span>
+              </button>
+            </div>
+          )}
+
+          <div
+            className={`rail-user ${menuOpen ? "menu-open" : ""}`}
+            onClick={() => setMenuOpen((prev) => !prev)}
+            role="button"
+            tabIndex={0}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label={`User menu for ${user?.full_name || "User"}`}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setMenuOpen((prev) => !prev);
+              }
+            }}
+            data-tooltip={collapsed && !menuOpen ? `${user?.full_name || "User"} (${user?.role || ""})` : undefined}
+          >
+            <div className="rail-user-avatar" aria-hidden="true">
+              {initials}
+            </div>
+            <div className="rail-user-info">
+              <span className="user-name" title={user?.full_name || "User"}>
+                {user?.full_name || "User"}
+              </span>
+              <span className="user-role-badge">{user?.role}</span>
+            </div>
+            <div className="rail-user-chevron" aria-hidden="true">
+              <ChevronUp size={14} className={`profile-chevron ${menuOpen ? "open" : ""}`} />
+            </div>
           </div>
         </div>
       </aside>
@@ -248,6 +353,18 @@ export default function Layout() {
       <main className="main-content">
         <Outlet />
       </main>
+
+      <ProfileModal
+        isOpen={profileModalOpen}
+        onClose={() => setProfileModalOpen(false)}
+        user={user}
+        onChangePasswordClick={() => setChangePasswordModalOpen(true)}
+      />
+
+      <ChangePasswordModal
+        isOpen={changePasswordModalOpen}
+        onClose={() => setChangePasswordModalOpen(false)}
+      />
     </div>
   );
 }

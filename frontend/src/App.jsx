@@ -12,13 +12,16 @@ import Metrics from "./pages/Metrics";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 import Register from "./pages/Register";
+import KBArticle from "./pages/KBArticle";
 import client from "./api/client";
 
 function Protected({ children, role }) {
   const { user, loading } = useAuth();
   if (loading) return <div className="loading-state">Loading workspace...</div>;
   if (!user) return <Navigate to="/login" replace />;
-  if (role && user.role !== role) return <Navigate to="/" replace />;
+  if (role && user.role !== role) {
+    return <Navigate to={user.role === "agent" ? "/dashboard" : "/tickets/mine"} replace />;
+  }
   return children;
 }
 
@@ -105,6 +108,14 @@ export default function App() {
           element={
             <Protected role="agent">
               <TicketDetail />
+            </Protected>
+          }
+        />
+        <Route
+          path="/kb/:id"
+          element={
+            <Protected role="agent">
+              <KBArticle />
             </Protected>
           }
         />

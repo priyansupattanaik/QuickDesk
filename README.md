@@ -81,6 +81,7 @@ Ticket resolution commits first, then emits a user-scoped SSE invalidation and a
 | GET | `/api/agents/summary` | Return agent summary data | Agent |
 | GET | `/api/events?token=...` | Stream ticket invalidation events | Authenticated query-param JWT |
 | GET | `/api/metrics` | Return status, category, median, and override metrics | Agent |
+| GET | `/api/kb/articles/{id}` | Open the authenticated source article behind a citation | Agent |
 | POST | `/api/tickets` | Create and classify a ticket | Employee or agent |
 | GET | `/api/tickets/mine` | List the signed-in employee's tickets | Employee or agent |
 | GET | `/api/tickets` | Filter and paginate the agent queue | Agent |
@@ -92,7 +93,8 @@ Ticket resolution commits first, then emits a user-scoped SSE invalidation and a
 ## Decisions and tradeoffs
 
 - I use ChromaDB in local persistent mode instead of FAISS because this six-article corpus needs a directory-backed collection and document metadata without another service. The retrieval behavior remains local and the index is rebuilt on startup.
-- I use `sentence-transformers/all-MiniLM-L6-v2` locally. I use `RecursiveCharacterTextSplitter` with 500-character chunks and 50-character overlap, then retrieve `k=3` chunks with a `0.2` similarity threshold.
+- I use `sentence-transformers/all-MiniLM-L6-v2` locally. LangChain's `RecursiveCharacterTextSplitter` creates 500-character chunks with 50-character overlap. Retrieval fuses dense Chroma matches with an IDF-weighted lexical rank, then applies deterministic reciprocal-rank fusion and returns at most three evidence chunks.
+- Each citation is validated against the current PostgreSQL article before it is persisted. The agent can click a citation and open the authenticated `/kb/{id}` source page, which displays the exact stored article content. A generated answer that contains unsupported vocabulary fails the conservative grounding check and is replaced by a grounded fallback draft.
 - I use NVIDIA NIM through the OpenAI-compatible client with the configured `meta/llama-3.2-11b-vision-instruct` model. Provider, parse, timeout, and validation failures fall back to `Other`/`Medium` and never block ticket creation.
 - I keep `ai_category` and `ai_priority` as the original model output and store agent decisions in `final_category` and `final_priority`. `override_logs` records each changed field, old value, new value, agent, and timestamp.
 - I use the `bcrypt` package directly. passlib is unmaintained, and its version check breaks against bcrypt 4.x.

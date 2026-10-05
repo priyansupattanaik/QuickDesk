@@ -314,9 +314,12 @@ export default function TicketDetail() {
                   <span className="citations-label">Citations</span>
                   <div className="citations-list">
                     {citations.map((c, i) => (
-                      <div key={c.article_id || i} className="citation-title">
-                        {c.title || c}
-                      </div>
+                      c.article_id ? (
+                        <Link key={c.article_id || i} to={`/kb/${c.article_id}`} className="citation-title">
+                          <span>{c.title || "Knowledge-base article"}</span>
+                          <span className="citation-open">Open source</span>
+                        </Link>
+                      ) : <div key={i} className="citation-title">{c.title || c}</div>
                     ))}
                   </div>
                 </div>
@@ -353,9 +356,12 @@ export default function TicketDetail() {
                     <span className="citations-label">Citations</span>
                     <div className="citations-list">
                       {citations.map((c, i) => (
-                        <div key={c.article_id || i} className="citation-title">
-                          {c.title || c}
-                        </div>
+                        c.article_id ? (
+                          <Link key={c.article_id || i} to={`/kb/${c.article_id}`} className="citation-title">
+                            <span>{c.title || "Knowledge-base article"}</span>
+                            <span className="citation-open">Open source</span>
+                          </Link>
+                        ) : <div key={i} className="citation-title">{c.title || c}</div>
                       ))}
                     </div>
                   </div>

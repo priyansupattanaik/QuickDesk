@@ -6,7 +6,7 @@ from app.core.deps import get_current_user
 from app.core.security import create_access_token, hash_password, verify_password
 from app.database import get_db
 from app.models import User, UserRole
-from app.schemas import LoginRequest, LoginResponse, RegisterRequest, UserResponse, UserSummary
+from app.schemas import ChangePasswordRequest, LoginRequest, LoginResponse, RegisterRequest, UserResponse, UserSummary
 
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -37,4 +37,19 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse
 @router.get("/me", response_model=UserResponse)
 def me(user: User = Depends(get_current_user)) -> User:
     return user
+
+
+@router.post("/change-password", status_code=status.HTTP_200_OK)
+def change_password(
+    payload: ChangePasswordRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    if not verify_password(payload.old_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    if payload.old_password == payload.new_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must be different from current password")
+    user.password_hash = hash_password(payload.new_password)
+    db.commit()
+    return {"message": "Password updated successfully"}
 
