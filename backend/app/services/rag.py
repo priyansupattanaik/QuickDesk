@@ -100,7 +100,11 @@ def rebuild_index() -> None:
         )
     except Exception as exc:
         _store = None
-        logger.warning("Knowledge base embeddings unavailable; using lexical retrieval fallback: %s", exc)
+        logger.exception("Knowledge base embeddings are unavailable: %s", exc)
+
+
+class RetrievalError(RuntimeError):
+    """Raised when embedding retrieval cannot run. There is no lexical substitute."""
 
 
 def _lexical_scores(query: str, documents: list[Document]) -> dict[str, float]:
@@ -144,14 +148,11 @@ def _hybrid_candidates(ticket: Ticket) -> list[Document]:
                 if score >= _dense_relevance_threshold
             ]
         except Exception as exc:
-            logger.warning("Dense retrieval failed; using lexical evidence: %s", exc)
-            _store = None
+            raise RetrievalError("Embedding search failed. No draft was generated.") from exc
 
     by_key = {str(index): document for index, document in enumerate(_documents)}
     lexical_keys = set(lexical_ranked)
     fused: dict[str, float] = defaultdict(float)
-    for rank, index in enumerate(lexical_ranked, start=1):
-        fused[index] += 1.0 / (60 + rank)
     for rank, (document, dense_score) in enumerate(dense_ranked, start=1):
         for candidate_key, candidate in by_key.items():
             if candidate_key not in lexical_keys:
@@ -171,26 +172,9 @@ def get_relevant_chunks(ticket: Ticket) -> list[Document]:
     global _index_attempted
     if not _index_attempted:
         rebuild_index()
-    candidates = _hybrid_candidates(ticket)
-    if candidates:
-        return candidates
-    return _lexical_fallback(ticket)
-
-
-def _lexical_fallback(ticket: Ticket) -> list[Document]:
-    """Return only exact text from PostgreSQL when dense retrieval is unavailable."""
-    documents = _documents
-    if not documents:
-        with SessionLocal() as db:
-            documents = _build_documents(db.scalars(select(KBArticle).order_by(KBArticle.slug)).all())
-    scores = _lexical_scores(f"{ticket.title}\n{ticket.description}", documents)
-    query_terms = _content_terms(f"{ticket.title}\n{ticket.description}")
-    ranked = [
-        index
-        for index in sorted(scores, key=scores.get, reverse=True)
-        if len(query_terms & _content_terms(documents[int(index)].page_content)) >= _minimum_lexical_overlap
-    ]
-    return [documents[int(index)] for index in ranked[:3]]
+    if _store is None:
+        raise RetrievalError("Knowledge-base embeddings are unavailable. No draft was generated.")
+    return _hybrid_candidates(ticket)
 
 
 def grounded_context(chunks: list[Document]) -> tuple[list[Document], list[dict[str, str]]]:

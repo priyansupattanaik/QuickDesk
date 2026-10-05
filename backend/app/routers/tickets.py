@@ -11,9 +11,9 @@ from app.database import get_db
 from app.models import OverrideLog, Ticket, TicketStatus, User
 from app.schemas import ClassificationOverride, TicketCreate, TicketListResponse, TicketReply, TicketResponse
 from app.realtime import publish
-from app.services.llm import DraftGenerationError, classify_ticket, generate_reply
+from app.services.llm import ClassificationError, DraftGenerationError, classify_ticket, generate_reply
 from app.services.notifier import notify_resolution
-from app.services.rag import get_relevant_chunks, grounded_context
+from app.services.rag import RetrievalError, get_relevant_chunks, grounded_context
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
@@ -41,19 +41,16 @@ async def create_ticket(payload: TicketCreate, user: User = Depends(require_role
     db.flush()
     try:
         result = classify_ticket(ticket.title, ticket.description)
-        ticket.ai_category = result["category"]
-        ticket.ai_priority = result["priority"]
-        ticket.ai_confidence = result.get("confidence")
-        ticket.final_category = result["category"]
-        ticket.final_priority = result["priority"]
-        ticket.ai_classified = not result.get("fallback", False)
-    except Exception:
-        logger.exception("Ticket classification failed")
-        ticket.ai_category = "Other"
-        ticket.ai_priority = "Medium"
-        ticket.final_category = "Other"
-        ticket.final_priority = "Medium"
-        ticket.ai_classified = False
+    except ClassificationError as exc:
+        db.rollback()
+        logger.warning("Ticket classification failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    ticket.ai_category = result["category"]
+    ticket.ai_priority = result["priority"]
+    ticket.ai_confidence = result.get("confidence")
+    ticket.final_category = result["category"]
+    ticket.final_priority = result["priority"]
+    ticket.ai_classified = True
     db.commit()
     created = _get_ticket(ticket.id, db)
     await publish("agents", "ticket_created", {"id": str(created.id), "title": created.title, "ai_category": created.ai_category, "ai_priority": created.ai_priority, "status": created.status.value, "created_at": created.created_at.isoformat(), "employee_email": created.employee.email})
@@ -124,6 +121,9 @@ def draft(ticket_id: UUID, user: User = Depends(require_role("agent")), db: Sess
     try:
         chunks = get_relevant_chunks(ticket)
         chunks, citations = grounded_context(chunks)
+    except RetrievalError as exc:
+        logger.warning("Knowledge-base retrieval failed: %s", exc)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception:
         logger.exception("Knowledge-base retrieval failed; AI draft was not generated")
         raise HTTPException(

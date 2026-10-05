@@ -18,52 +18,13 @@ PRIORITIES = {"Low", "Medium", "High"}
 
 _GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
-_CATEGORY_TERMS = {
-    "IT": (
-        "vpn",
-        "password",
-        "login",
-        "laptop",
-        "hardware",
-        "email",
-        "drive",
-        "account",
-        "lockout",
-        "wifi",
-        "software",
-        "computer",
-    ),
-    "HR": ("leave", "vacation", "pto", "holiday", "absence", "sick"),
-    "Finance": ("expense", "reimbursement", "invoice", "receipt", "payroll"),
-    "Admin": ("badge", "printer", "facilities", "office", "lobby"),
-}
-_HIGH_TERMS = ("urgent", "production", "outage", "locked", "lockout", "cannot", "blocked", "down", "asap")
-_LOW_TERMS = ("question", "wondering", "whenever", "not urgent", "low priority")
-
 
 class DraftGenerationError(RuntimeError):
     """Raised when a grounded AI draft cannot be produced."""
 
 
-def _text(title: str, description: str) -> str:
-    return f"{title} {description}".lower()
-
-
-def _keyword_classify(title: str, description: str) -> dict[str, Any]:
-    text = _text(title, description)
-    scores = {category: sum(term in text for term in terms) for category, terms in _CATEGORY_TERMS.items()}
-    best_category, hits = max(scores.items(), key=lambda item: item[1])
-    if hits == 0 or best_category not in CATEGORIES:
-        return {"category": "Other", "priority": "Medium", "confidence": None, "fallback": True}
-
-    if any(term in text for term in _HIGH_TERMS):
-        priority = "High"
-    elif any(term in text for term in _LOW_TERMS):
-        priority = "Low"
-    else:
-        priority = "Medium"
-    confidence = min(100, 40 + hits * 15)
-    return {"category": best_category, "priority": priority, "confidence": confidence, "fallback": False}
+class ClassificationError(RuntimeError):
+    """Raised when Groq does not return an allowed category and priority."""
 
 
 def _require_groq_key() -> str:
@@ -148,14 +109,13 @@ def _normalize_classification(payload: dict[str, Any]) -> dict[str, Any] | None:
         "category": category,
         "priority": priority,
         "confidence": confidence,
-        "fallback": False,
     }
 
 
 def classify_ticket(title: str, description: str) -> dict[str, Any]:
-    """Classify with Groq when configured; otherwise use local keyword rules."""
+    """Classify a ticket with Groq. There is no local substitute."""
     if not (settings.groq_api_key or "").strip():
-        return _keyword_classify(title, description)
+        raise ClassificationError("GROQ_API_KEY is not set. The ticket was not created.")
 
     system = (
         "You classify internal helpdesk tickets. "
@@ -168,13 +128,12 @@ def classify_ticket(title: str, description: str) -> dict[str, Any]:
     user = f"Title: {title}\n\nDescription: {description}"
     try:
         payload = _chat_json(system, user)
-        normalized = _normalize_classification(payload)
-        if normalized is not None:
-            return normalized
-        logger.warning("Groq classification returned invalid labels; using keyword fallback")
     except Exception as exc:
-        logger.warning("Groq classification failed; using keyword fallback: %s", exc)
-    return _keyword_classify(title, description)
+        raise ClassificationError("Groq could not classify the ticket. The ticket was not created.") from exc
+    normalized = _normalize_classification(payload)
+    if normalized is None:
+        raise ClassificationError("Groq returned labels outside the allowed set. The ticket was not created.")
+    return normalized
 
 
 def _format_excerpts(context_chunks: list[Any]) -> str:
