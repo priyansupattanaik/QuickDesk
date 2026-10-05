@@ -131,8 +131,10 @@ export default function Layout() {
         >
           <Menu size={20} />
         </button>
-        <div className="mobile-brand">
-          <span className="brand-name">QuickDesk</span>
+        <div className="mobile-brand" aria-label="QuickDesk">
+          <span className="brand-name">
+            QuickDesk<span className="brand-status-dot" aria-hidden="true">.</span>
+          </span>
         </div>
         <div
           className="mobile-user-avatar"
@@ -183,6 +185,7 @@ export default function Layout() {
               <span className="brand-chars-uick">uick</span>
               <span className="brand-char brand-char-d">D</span>
               <span className="brand-chars-esk">esk</span>
+              <span className="brand-status-dot" aria-hidden="true">.</span>
             </span>
           </div>
 

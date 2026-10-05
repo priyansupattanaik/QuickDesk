@@ -21,8 +21,10 @@ export function AuthSplitLayout({ title, children }) {
     <div className="auth-split-screen">
       <div className="auth-split-left">
         <div className="auth-left-content">
-          <p className="auth-kicker">QuickDesk</p>
-          <p className="auth-statement">Your tickets, with a draft already waiting.</p>
+          <p className="auth-kicker">
+            QuickDesk<span className="brand-status-dot" aria-hidden="true">.</span>
+          </p>
+          <p className="auth-statement">Workplace support, without the wait.</p>
         </div>
       </div>
       <div className="auth-split-right">

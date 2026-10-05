@@ -151,7 +151,7 @@ a:hover {
 
 .brand-wordmark {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   font-family: var(--font-sans);
   font-size: 19px;
   font-weight: 750;
@@ -159,6 +159,22 @@ a:hover {
   color: var(--text-ink);
   line-height: 1;
   white-space: nowrap;
+}
+
+.brand-status-dot {
+  display: inline;
+  flex: none;
+  margin-left: 2px;
+  color: var(--accent-teal);
+  font-size: 1.15em;
+  font-weight: 750;
+  line-height: inherit;
+  position: static;
+}
+
+.auth-kicker .brand-status-dot {
+  margin-left: 2px;
+  font-size: inherit;
 }
 
 .brand-char {
@@ -960,6 +976,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .auth-kicker {
+  display: block;
   margin: 0 0 12px;
   font-size: 12px;
   font-weight: 700;
