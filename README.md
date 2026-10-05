@@ -6,41 +6,63 @@ QuickDesk is an internal helpdesk where employees submit tickets and agents clas
 
 ## How to run locally
 
-Run the complete application with Docker Compose. This starts PostgreSQL, the FastAPI backend, and the frontend together; no manual database creation, Python virtual environment, or frontend `npm install` is required.
+Run PostgreSQL with Docker, then run the FastAPI backend and React/Vite frontend on the host. This keeps the local embedding cache and one-worker SSE hub on the same machine.
 
 ### 1. Create `.env`
 
 From the repository root in PowerShell:
 
 ```powershell
-if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+Copy-Item .env.example .env
+notepad .env
 ```
 
 Set these values in `.env`:
 
 ```env
 JWT_SECRET_KEY=quickdesk
-QUICKDESK_ENV=dev
 NVIDIA_API_KEY=your_nvidia_key_here
+QUICKDESK_ENV=dev
 ```
 
 `JWT_SECRET_KEY=quickdesk` is acceptable for a private local demo. For a shared or deployed environment, use a random value generated with `openssl rand -hex 32` or Python’s `secrets.token_hex(32)`. Keep `.env` private and never commit API keys or passwords.
 
-### 2. Start the full stack
+### 2. Start PostgreSQL with Docker
 
 ```powershell
-docker compose --profile full up --build -d
+docker compose up -d
 ```
 
-Compose creates the PostgreSQL database and user from `docker-compose.yml`, runs the backend migration and seed steps, and serves the frontend through the containerized web server. The first build may take time while Python and the embedding dependencies are downloaded.
+Compose creates the PostgreSQL database and user from `docker-compose.yml`. No manual database creation is required. If local PostgreSQL is already using port `5432`, stop it before starting Docker PostgreSQL.
 
-Open `http://localhost`. To watch backend logs during a demo:
+### 3. Start the backend
 
 ```powershell
-docker compose logs -f backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r backend\requirements.txt
+
+Set-Location backend
+python migrate.py
+python seed.py
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
 **Knowledge base index and embeddings (first run):** On startup, `backend/app/main.py` calls `rebuild_index()`, which reads seeded KB articles from Postgres and writes a local Chroma collection under `backend/chroma_db/` (gitignored). The first successful run downloads `sentence-transformers/all-MiniLM-L6-v2` into your Hugging Face cache (~90MB). If the model or index is missing, the service uses a grounded lexical fallback over the same Postgres articles, so drafts still succeed with citations. Re-run `python seed.py` then restart Uvicorn to rebuild after an empty database.
+
+Use one Uvicorn worker because the SSE hub is process-local. Keep this terminal running. The API health check is available at `http://127.0.0.1:8000/api/health`.
+
+### 4. Start the frontend
+
+Open a second terminal:
+
+```powershell
+Set-Location "D:\My Creations\QuickDesk\frontend"
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`.
 
 The seeded credentials are:
 
@@ -49,15 +71,15 @@ The seeded credentials are:
 | Agent | `agent@quickdesk.dev` | `Agent#Pass1` |
 | Employee | `employee@quickdesk.dev` | `Employee#Pass1` |
 
-The console notifier is selected by default with `EMAIL_BACKEND=console`; it logs a mock email and does not send external email. The frontend is served at `http://localhost`, while the API is available on port `8000` for health checks. Do not run another PostgreSQL service on port `5432` or another backend on port `8000` at the same time.
+The console notifier is selected by default with `EMAIL_BACKEND=console`; it logs a mock email and does not send external email. Do not run another PostgreSQL service on port `5432` or another backend on port `8000` at the same time.
 
-Stop the stack after the demo:
+Stop the backend with `Ctrl+C`, then stop PostgreSQL after the demo:
 
 ```powershell
-docker compose --profile full down
+docker compose down
 ```
 
-The PostgreSQL data remains in the Docker volume until it is explicitly removed. To remove the database volume as well, use `docker compose --profile full down -v`.
+The PostgreSQL data remains in the Docker volume until it is explicitly removed. To remove the database volume as well, use `docker compose down -v`.
 
 ## Architecture
 
