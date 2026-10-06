@@ -190,7 +190,7 @@ Updates are one-way server → browser invalidations (`ticket_created` to agents
 
 ### g) Where AI tools helped, and where they hurt?
 
-The design decisions were mine. I designed the frontend, the RAG pipeline, and the overall architecture, and I chose the stack and decided how and why each piece is used. Most of the implementation and coding was done with AI tools: Codex, Groq, and Antigravity. They wrote most of the code from my design, helped me debug, fixed the flow of the application, and handled minor frontend changes. Where they hurt was integration: generated code often looked finished before it actually worked end to end, so I still had to check each role path and flow myself before calling a feature done.
+The design decisions were mine. I designed the frontend, the RAG pipeline, and the overall architecture, and I chose the stack and decided how and why each piece is used. Most of the implementation and coding was done with AI tools: Codex, Groq, and Antigravity. They wrote most of the code from my design, helped me debug, fixed the flow of the application, and handled minor frontend changes. Where they hurt was integration: generated code often looked finished before it actually worked end to end, so I still had to check each role path and flow myself before its done.
 
 ## What I would do with more time
 
