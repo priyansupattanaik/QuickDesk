@@ -190,7 +190,7 @@ Updates are one-way server → browser invalidations (`ticket_created` to agents
 
 ### g) Where AI tools helped, and where they hurt?
 
-AI scaffolding got FastAPI routers, React pages, and the LangChain/Chroma shape standing quickly, which mattered under a short deadline. It also left integration landmines that only showed up when walking the real agent queue: optimistic SSE inserts still reason about **`ai_category` / `ai_priority`** while the list API filters on **`final_category` / `final_priority`**, so a filtered queue can disagree with a live insert; employee ticket deep-links and ownership edge cases needed another human pass after the generated UI looked “done.” I treat generated code as a first draft and verify every role path against the live API before calling a feature finished.
+The design decisions were mine. I designed the frontend, the RAG pipeline, and the overall architecture, and I chose the stack and decided how and why each piece is used. Most of the implementation and coding was done with AI tools: Codex, Groq, and Antigravity. They wrote most of the code from my design, helped me debug, fixed the flow of the application, and handled minor frontend changes. Where they hurt was integration: generated code often looked finished before it actually worked end to end, so I still had to check each role path and flow myself before calling a feature done.
 
 ## What I would do with more time
 
