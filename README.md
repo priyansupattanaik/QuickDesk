@@ -4,7 +4,7 @@ QuickDesk is an internal helpdesk: employees submit tickets, FastAPI classifies 
 
 ## Steps to run locally
 
-Documented path: **Postgres via Docker**, then **FastAPI and Vite on the host**. Do not use `docker compose --profile full` for the graded run â€” that profile is optional packaging only.
+Documented path: **Postgres via Docker**, then **FastAPI and Vite on the host**. Do not use `docker compose --profile full` for the graded run — that profile is optional packaging only.
 
 ### Prerequisites
 
@@ -116,7 +116,7 @@ Add `-v` only if you also want to wipe the Postgres volume.
                  users, KB    chroma_db)   RAG drafts
 ```
 
-**RAG path (agent â€œGenerate AI draftâ€):** ticket title/description â†’ hybrid retrieve (dense Chroma + IDF lexical, RRF, top 3 chunks) â†’ validate chunk text against Postgres article â†’ expand to full article text for the prompt â†’ Groq draft â†’ reject ungrounded URLs / bad no-match replies â†’ save `ai_draft` + citations.
+**RAG path (agent “Generate AI draft”):** ticket title/description → hybrid retrieve (dense Chroma + IDF lexical, RRF, top 3 chunks) → validate chunk text against Postgres article → expand to full article text for the prompt → Groq draft → reject ungrounded URLs / bad no-match replies → save `ai_draft` + citations.
 
 ## Stack (as implemented)
 
@@ -164,11 +164,11 @@ Seeded Markdown under `backend/kb/` is loaded into Postgres by `seed.py` (six ar
 Retrieval for a ticket (`get_relevant_chunks` in `rag.py`):
 
 1. Build query = title + description.
-2. **Dense:** Chroma `similarity_search_with_relevance_scores`, keep scores **â‰¥ 0.2**, up to 8.
-3. **Lexical:** IDF-weighted term scores; require **â‰¥ 2** overlapping content terms (stop words / generic words stripped); top 8.
+2. **Dense:** Chroma `similarity_search_with_relevance_scores`, keep scores **≥ 0.2**, up to 8.
+3. **Lexical:** IDF-weighted term scores; require **≥ 2** overlapping content terms (stop words / generic words stripped); top 8.
 4. Keep an embedding hit only when it also shares those content terms. There is no lexical-only result. At most **3** chunks are returned.
 5. `grounded_context` reloads full article bodies from Postgres and drops citations whose chunk text is not a substring of the stored article.
-6. `generate_reply` in `llm.py` prompts Groq with those excerpts only: no invented URLs/policies; if no excerpts, the model must say there is no documented knowledge yet and that we will look into it and get back â€” otherwise the draft is rejected and nothing is saved.
+6. `generate_reply` in `llm.py` prompts Groq with those excerpts only: no invented URLs/policies; if no excerpts, the model must say there is no documented knowledge yet and that we will look into it and get back — otherwise the draft is rejected and nothing is saved.
 
 ### c) Invalid LLM category / priority?
 
@@ -178,19 +178,19 @@ Allowlists in `llm.py`: categories `{IT, HR, Finance, Admin, Other}`, priorities
 
 In **`localStorage`** under key `quickdesk_token` (`AuthContext.jsx` + axios interceptor in `api/client.js`). That avoids CSRF complexity for a Bearer SPA and keeps `EventSource` able to pass the same token as `?token=` (browsers cannot set `Authorization` on EventSource). Tradeoff: any XSS can read the token. For a production level application it would want HTTPS, shorter TTLs, refresh rotation, and a tighter cookie strategy.
 
-### e) Backend RBAC â€” what stops an employee guessing an agent URL?
+### e) Backend RBAC — what stops an employee guessing an agent URL?
 
-UI route guards (`Protected` in `App.jsx`) only hide pages. Real enforcement is FastAPI: `get_current_user` validates the JWT; `require_role("agent")` protects agent list, metrics, KB article, classification override, AI draft, and reply. Ticket `GET /{id}` allows an agent or the **owning** employee (`employee_id` check â†’ 403 otherwise). Guessing `/api/tickets` or `/api/metrics` with an employee token still returns **403**. Hiding a nav link is not the security boundary.
+UI route guards (`Protected` in `App.jsx`) only hide pages. Real enforcement is FastAPI: `get_current_user` validates the JWT; `require_role("agent")` protects agent list, metrics, KB article, classification override, AI draft, and reply. Ticket `GET /{id}` allows an agent or the **owning** employee (`employee_id` check → 403 otherwise). Guessing `/api/tickets` or `/api/metrics` with an employee token still returns **403**. Hiding a nav link is not the security boundary.
 
 ### f) Why SSE instead of Socket.io / WebSockets? Disconnect failure mode?
 
-Updates are one-way server â†’ browser invalidations (`ticket_created` to agents, `ticket_resolved` to the employee). `EventSource` reconnects with backoff in `useTicketEvents.js`; on open/error the UI refetches REST. Socket.io would add another realtime stack and bidirectional protocol we do not need. A raw WebSocket would need custom heartbeat/reconnect for the same signal.
+Updates are one-way server → browser invalidations (`ticket_created` to agents, `ticket_resolved` to the employee). `EventSource` reconnects with backoff in `useTicketEvents.js`; on open/error the UI refetches REST. Socket.io would add another realtime stack and bidirectional protocol we do not need. A raw WebSocket would need custom heartbeat/reconnect for the same signal.
 
-**Failure mode:** the hub is an in-process `asyncio.Queue` set (`realtime.py`). With multiple Uvicorn workers, events published in worker A are invisible to connections on worker B â€” hence **`--workers 1`**. If the stream drops mid-session, the client may miss an event until reconnect + REST refetch. A full queue (max 50) drops that connection. Redis pub/sub (or similar) would be required before scaling workers.
+**Failure mode:** the hub is an in-process `asyncio.Queue` set (`realtime.py`). With multiple Uvicorn workers, events published in worker A are invisible to connections on worker B — hence **`--workers 1`**. If the stream drops mid-session, the client may miss an event until reconnect + REST refetch. A full queue (max 50) drops that connection. Redis pub/sub (or similar) would be required before scaling workers.
 
 ### g) Where AI tools helped, and where they hurt?
 
-AI scaffolding got FastAPI routers, React pages, and the LangChain/Chroma shape standing quickly, which mattered under a short deadline. It also left integration landmines that only showed up when walking the real agent queue: optimistic SSE inserts still reason about **`ai_category` / `ai_priority`** while the list API filters on **`final_category` / `final_priority`**, so a filtered queue can disagree with a live insert; employee ticket deep-links and ownership edge cases needed another human pass after the generated UI looked â€œdone.â€ I treat generated code as a first draft and verify every role path against the live API before calling a feature finished.
+AI scaffolding got FastAPI routers, React pages, and the LangChain/Chroma shape standing quickly, which mattered under a short deadline. It also left integration landmines that only showed up when walking the real agent queue: optimistic SSE inserts still reason about **`ai_category` / `ai_priority`** while the list API filters on **`final_category` / `final_priority`**, so a filtered queue can disagree with a live insert; employee ticket deep-links and ownership edge cases needed another human pass after the generated UI looked “done.” I treat generated code as a first draft and verify every role path against the live API before calling a feature finished.
 
 ## What I would do with more time
 
@@ -203,11 +203,11 @@ AI scaffolding got FastAPI routers, React pages, and the LangChain/Chroma shape 
 
 ## Known issues / limitations
 
-- SSE hub is process-local â†’ must run Uvicorn with one worker.
+- SSE hub is process-local → must run Uvicorn with one worker.
 - SSE auth uses a query-string JWT because EventSource cannot send Bearer headers.
-- Chroma index rebuilds on process start; there is no live â€œreindex KBâ€ API.
+- Chroma index rebuilds on process start; there is no live “reindex KB” API.
 - Title search is `ILIKE`, not indexed full-text.
-- Agent dashboard live `ticket_created` handling still compares filters to **`ai_*`** fields while REST listing filters **`final_*`** â€” can disagree after overrides or with filters on.
+- Agent dashboard live `ticket_created` handling still compares filters to **`ai_*`** fields while REST listing filters **`final_*`** — can disagree after overrides or with filters on.
 - JWTs in `localStorage`, no refresh tokens; default expiry 60 minutes.
 - Console notifier only; no outbound email.
 - Groq outage or empty `GROQ_API_KEY` stops ticket creation and draft generation. Nothing is classified or drafted by a local substitute.
@@ -215,5 +215,5 @@ AI scaffolding got FastAPI routers, React pages, and the LangChain/Chroma shape 
 
 ### Stretch goals (2/2)
 
-1. **Console resolution email** â€” `EMAIL_BACKEND=console` builds and logs a plain-text mock mail after a successful resolve commit.
+1. **Console resolution email** — `EMAIL_BACKEND=console` builds and logs a plain-text mock mail after a successful resolve commit.
 2. **AI confidence** — `tickets.ai_confidence` (0–100, nullable) from Groq, shown next to suggested category and priority.
